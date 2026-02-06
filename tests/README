@@ -1,4 +1,5 @@
 Run with nturns=25
 LINES = [50,100, 150]
 
-**** zperiod = 1;
+**** zperiod = 5;
+There was a fix for this on 2/6/2026.

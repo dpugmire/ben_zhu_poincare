@@ -30,7 +30,7 @@ end
 % Mesh resolution info
 %nx = 260; ny = 128; nz = 256; zperiod = 1;
 
-divertorCase = 0;
+divertorCase = 1;
 
 if divertorCase == 0
     gridfile =  '/Users/dpn/proj/bout++/nersc_data/circle-zonal/cbm18_dens3_0.5BS_516nx64ny.grid.nc';
@@ -40,7 +40,7 @@ if divertorCase == 0
     divertor = 0;
     nx = 516; ny = 64; nz = 64;
     zperiod = 5;
-    zperiod = 1; % should be 5?
+    %zperiod = 1; % should be 5?
 elseif divertorCase == 1
     gridfile = '/Users/dpn/proj/bout++/poincare/boutpp_poincare/data/kstar_30306_7850_psi085105_nx260ny128_f2_v0.nc';
     %aparfile = '/Users/dpn/proj/bout++/poincare/boutpp_poincare/data/apar_kstar_30306_7850_psi085105_nx260ny128_f2_nz256.mat';
@@ -357,11 +357,20 @@ yiarray = (1:ny);
         fprintf('\tConfiguration to be implemented!');
     end    
 
-    for zp=1:zperiod
-        apar(:,:,(zp-1)*nzG/zperiod+1:zp*nzG/zperiod)=apar0;
-        dapardx(:,:,(zp-1)*nzG/zperiod+1:zp*nzG/zperiod)=dapardx0;
-        dapardy(:,:,(zp-1)*nzG/zperiod+1:zp*nzG/zperiod)=dapardy0;
-        dapardz(:,:,(zp-1)*nzG/zperiod+1:zp*nzG/zperiod)=dapardz0;
+    if (size(apar0,3) == nzG)
+        apar = apar0;
+        dapardx = dapardx0;
+        dapardy = dapardy0;
+        dapardz = dapardz0;
+    elseif (size(apar0,3) == nz)
+        for zp=1:zperiod
+            apar(:,:,(zp-1)*nzG/zperiod+1:zp*nzG/zperiod)=apar0;
+            dapardx(:,:,(zp-1)*nzG/zperiod+1:zp*nzG/zperiod)=dapardx0;
+            dapardy(:,:,(zp-1)*nzG/zperiod+1:zp*nzG/zperiod)=dapardy0;
+            dapardz(:,:,(zp-1)*nzG/zperiod+1:zp*nzG/zperiod)=dapardz0;
+        end
+    else
+        error('Unexpected Apar z-dimension: %d (expected %d or %d).', size(apar0,3), nz, nzG);
     end
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%    
