@@ -1,0 +1,4 @@
+Run with nturns=25
+LINES = [50,100, 150]
+
+**** zperiod = 1;

@@ -30,7 +30,7 @@ end
 % Mesh resolution info
 %nx = 260; ny = 128; nz = 256; zperiod = 1;
 
-divertorCase = 1;
+divertorCase = 0;
 
 if divertorCase == 0
     gridfile =  '/Users/dpn/proj/bout++/nersc_data/circle-zonal/cbm18_dens3_0.5BS_516nx64ny.grid.nc';
@@ -40,6 +40,7 @@ if divertorCase == 0
     divertor = 0;
     nx = 516; ny = 64; nz = 64;
     zperiod = 5;
+    zperiod = 1; % should be 5?
 elseif divertorCase == 1
     gridfile = '/Users/dpn/proj/bout++/poincare/boutpp_poincare/data/kstar_30306_7850_psi085105_nx260ny128_f2_v0.nc';
     %aparfile = '/Users/dpn/proj/bout++/poincare/boutpp_poincare/data/apar_kstar_30306_7850_psi085105_nx260ny128_f2_nz256.mat';
@@ -271,8 +272,15 @@ yiarray = (1:ny);
     
     % construct/patch closed flux surface region for a better Poincare plot
     xiarray_cfr=double(1:ixsep);
-    yiarray_cfr=double(nypf1+1:nypf2+1); % note one additional grid point is patched
-    theta_cfr=theta(yiarray_cfr); theta_cfr(end)=2.; % theta is pi based
+    if (divertor == 0)
+        yiarray_cfr=double(1:ny+1); % note one additional grid point is patched
+        theta_cfr=zeros(1,ny+1);
+        theta_cfr(1:ny)=theta(1:ny);
+        theta_cfr(end)=2.; % theta is pi based
+    else
+        yiarray_cfr=double(nypf1+1:nypf2+1); % note one additional grid point is patched
+        theta_cfr=theta(yiarray_cfr); theta_cfr(end)=2.; % theta is pi based
+    end
     
     rxy_cfr=rxy(1:ixsep,nypf1+1:nypf2);   rxy_cfr(:,end+1)=rxy_cfr(:,1);
     zxy_cfr=zxy(1:ixsep,nypf1+1:nypf2);   zxy_cfr(:,end+1)=zxy_cfr(:,1);
