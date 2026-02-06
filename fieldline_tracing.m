@@ -16,6 +16,9 @@ set(groot,'DefaultLineMarkerSize',12);
 if exist('OCTAVE_VERSION', 'builtin') ~= 0
     disp('Running in Octave');
     pkg load netcdf; %% for octave
+    %addpath('/Users/dpn/proj/bout++/ben_zhu_poincare/npy-matlab/npy-matlab');
+    addpath('./npy-matlab/npy-matlab');
+
 else
     disp('Running in MATLAB');
 end
@@ -30,20 +33,25 @@ end
 divertorCase = 1;
 
 if divertorCase == 0
-    gridfile =  '../kstar_30306_7850_psi085105_nx260ny128_f2_v0.nc';
-    gridfile = "/Users/dpn/proj/bout++/poincare/boutpp_poincare/data/kstar_30306_7850_psi085105_nx260ny128_f2_v0.nc";
+    gridfile =  '/Users/dpn/proj/bout++/nersc_data/circle-zonal/cbm18_dens3_0.5BS_516nx64ny.grid.nc';
+    aparfile = '/Users/dpn/proj/bout++/nersc_data/circle-zonal/apar_cbm18_dens3_0.5BS_516nx64ny64nz_t500.npy';
+    apar = readNPY(aparfile);
+    fprintf('Apar shape=%s\n', mat2str(size(apar)));
     divertor = 0;
     nx = 516; ny = 64; nz = 64;
     zperiod = 5;
 elseif divertorCase == 1
     gridfile = '/Users/dpn/proj/bout++/poincare/boutpp_poincare/data/kstar_30306_7850_psi085105_nx260ny128_f2_v0.nc';
-    aparfile = '/Users/dpn/proj/bout++/poincare/boutpp_poincare/data/apar_kstar_30306_7850_psi085105_nx260ny128_f2_nz256.mat';
+    %aparfile = '/Users/dpn/proj/bout++/poincare/boutpp_poincare/data/apar_kstar_30306_7850_psi085105_nx260ny128_f2_nz256.mat';
+    aparfile = '/Users/dpn/proj/bout++/nersc_data/xpoint_singlenull/apar_kstar_30306_7850_psi085105_nx260ny128_f2_nz256.mat'
+    apar=load(aparfile).apar;
+
     divertor = 1;
     nx = 260; ny = 128; nz = 256;
-    zperiod = 5;
+    zperiod = 1; % should be 5?
 else
     fprintf('to be implemented!');
-    die();
+    error('Exiting now.');
 end
 
 %gridfile = '/Users/dpn/proj/bout++/poincare/boutpp_poincare/data/kstar_30306_7850_psi085105_nx260ny128_f2_v0.nc';
@@ -327,19 +335,15 @@ yiarray = (1:ny);
     % load BOUT++ psi data or Apar data somewhere
     %p=restore_idl('./psi.sav');
     %psi=p.PSI;
-    if (divertor == 0)
-        rmp=load('/Users/dpn/proj/bout++/nersc_data/circle-zonal/apar.t500.mat');
-    elseif (divertor == 1)
-        rmp=load(aparfile);
-    end
+
 
     if (divertor == 0)
         [apar0,dapardx0,dapardy0,dapardz0] = ...
-            get_apar_sc(rmp.apar,bxy,psixy,zShift,sa,sinty,dy0,dz,...
+            get_apar_sc(apar,bxy,psixy,zShift,sa,sinty,dy0,dz,...
             zperiod,0,1,0);
     elseif (divertor == 1)
         [apar0,dapardx0,dapardy0,dapardz0] = ...
-            get_apar_sn(rmp.apar,bxy,psixy,zShift,sa,sinty,dy0,dz,...
+            get_apar_sn(apar,bxy,psixy,zShift,sa,sinty,dy0,dz,...
             ixsep,nypf1,nypf2,zperiod,0,1,0);
     else
         fprintf('\tConfiguration to be implemented!');
