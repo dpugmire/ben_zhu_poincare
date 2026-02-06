@@ -6,8 +6,16 @@
 %
 %  by B.Zhu (10/2023)
 
-addpath('~/Documents/MATLAB/colormaps/');
-addpath('~/Documents/MATLAB/utilities/');
+#addpath('~/Documents/MATLAB/colormaps/');
+#addpath('~/Documents/MATLAB/utilities/');
+
+% Check if running in Octave
+if exist('OCTAVE_VERSION', 'builtin') ~= 0
+    disp('Running in Octave');
+    pkg load netcdf; %% for octave
+else
+    disp('Running in MATLAB');
+end
 
 clear all;
 close all;
@@ -18,10 +26,12 @@ set(groot,'DefaultTextFontSize',20);
 set(groot,'DefaultLineMarkerSize',2);
 
 % step 0: equilibrium and grid resolution
-g = read_eqdsk('g030306.007850_kin_2','../../../GPEC/30306_7850/');
+%g = read_eqdsk('g030306.007850_kin_2','../../../GPEC/30306_7850/');
 gridfile =  '../kstar_30306_7850_psi085105_nx260ny128_f2_v0.nc';
+gridfile = "/Users/dpn/proj/bout++/poincare/boutpp_poincare/data/kstar_30306_7850_psi085105_nx260ny128_f2_v0.nc";
+
 nx = 260; ny = 128; nz = 256; zperiod = 1; 
-nlines = 256;
+nlines = 13;
 direction = 1;
 
 % read in grid info
@@ -83,7 +93,7 @@ end
 subplot(1,2,1)
 hold on
 plot(sepx,sepy,'--k');
-plot(g.R_limits,g.Z_limits,'k'); 
+%plot(g.R_limits,g.Z_limits,'k');
 axis equal; xlim([1.2,2.3]);
 xlabel('R(m)'); ylabel('Z(m)')
 subplot(1,2,2)
