@@ -394,6 +394,8 @@ yiarray = (1:ny);
     cm = jet(nlines);
     ip_fid = fopen('ip_xyz.txt','w');
     fprintf(ip_fid,'iline it ipx ipy ipz\n');
+    traj_fid = fopen('traj_xyz.txt','w');
+    fprintf(traj_fid,'iline it x y z\n');
 
     %parfor iline = 1:nlines
     LINES = 1:nlines;
@@ -659,6 +661,10 @@ yiarray = (1:ny);
         fl_y3d(istep) = x3d_tmp*sin(zvalue)+y3d_tmp*cos(zvalue);   
         fl_z3d(istep) = interp1(xiarray,zxy(:,traj(3,istep)),traj(2,istep));
     end
+    for istep=1:itmax
+        fprintf(traj_fid,'%d %d %.16g %.16g %.16g\n',iline,istep, ...
+            fl_x3d(istep),fl_y3d(istep),fl_z3d(istep));
+    end
  
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %     % [check 5] plot distance between two adjacent points
@@ -821,4 +827,7 @@ yiarray = (1:ny);
     
     if (exist('ip_fid','var') && ip_fid>0)
         fclose(ip_fid);
+    end
+    if (exist('traj_fid','var') && traj_fid>0)
+        fclose(traj_fid);
     end
