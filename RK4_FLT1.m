@@ -8,7 +8,11 @@
 %       yn+1=yn+(k1+2k2+2k3+k4)/6
 %
 function [xEnd,zEnd] = RK4_FLT1(xStart,yStart,zStart,dxdy,dzdy,xarray,zarray,region,dxdy_pm1,dzdy_pm1,dir,nypf1,nypf2)
-    hh=1/2.; h6=1/6.;
+    % step size
+    h = 1.0;
+    %h = 0.5;
+    hh = h/2.0;
+    h6 = h/6.0;
     
     % need half step and full step info
     if (dir == 1)
