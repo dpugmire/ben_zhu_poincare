@@ -40,7 +40,8 @@ nlines = 256; % number of field-lines in radial direction
 deltaix = 1; ixoffset = 1; % by default, line tracing starts at 
                            % index space (deltaix*ilines+ixoffset, iy, iz)
 % (Roughly) total poloidal turns
-nturns = 250; 
+nturns = 250;
+nturns = 25;
 nsteps = nturns*ny;
 np = 1250; % maximum puncture points, rougly nturns*q
 % Output option
@@ -261,7 +262,7 @@ yiarray = (1:ny);
     JJ = 4.*pi*1.e-7*bpxy./hthe./(bxy.^2).*jpar0;
     
     fprintf('Loading perturbed field information ...\n');
-    % this script use BOUT++ output psi, note apar=psi*B0 -- refer to idl script  
+    % this script use BOUT++ output psi, note apar=psi*B0 -- refer to idl script
     apar    = zeros(nx,ny,nzG);
     dapardx = zeros(nx,ny,nzG);
     dapardy = zeros(nx,ny,nzG);
@@ -389,11 +390,15 @@ yiarray = (1:ny);
     
     fprintf('Starting field-line tracing ...\n');
     fprintf('\n');
-    
+
     cm = jet(nlines);
+    ip_fid = fopen('ip_xyz.txt','w');
+    fprintf(ip_fid,'iline it ipx ipy ipz\n');
 
     %parfor iline = 1:nlines
-    for iline = 1:nlines
+    LINES = 1:nlines;
+    LINES = [50, 100, 150];
+    for iline = LINES
         % pick starting points
         xind = iline;
         xStart = psixy(xind,jyomp); % note here jyomp doesn't matter
@@ -439,7 +444,7 @@ yiarray = (1:ny);
         end
 
         % record field-line location info in trajectory array
-        traj(1,it) = 1; 
+        traj(1,it) = 1;
         traj(2,it) = xind;
         traj(3,it) = yStart;
         traj(4,it) = zind;
@@ -698,7 +703,7 @@ yiarray = (1:ny);
         xind_tmp=b*traj(2,it)+a*traj(2,it+1);
         % default, unless at the branch cut
         yind_tmp=b*traj(3,it)+a*traj(3,it+1);
-        % with raw zEnd information, it doesn't matter whether the 
+        % with raw zEnd information, it doesn't matter whether the
         % field-line across the branch cut or not, unless ...
         zvalue = b*traj(7,it)+a*traj(7,it+1);
         if (abs(traj(7,it)-traj(7,it+1))>1.)
@@ -743,6 +748,7 @@ yiarray = (1:ny);
                 px(ip)=ipx;
                 py(ip)=ipy;
                 pz(ip)=ipz;
+                fprintf(ip_fid,'%d %d %.16g %.16g %.16g\n',iline,it,ipx,ipy,ipz);
             
                 ptheta(ip)=interp1(yiarray_cfr,theta_cfr,yind_tmp);
                 ppsi(ip)=interp1(xiarray,xarray,xind_tmp);
@@ -812,4 +818,7 @@ yiarray = (1:ny);
     %clear traj fl_x3d fl_y3d fl_z3d fit ffl_x3d iit px py pz ptheta ppsi pxp pyp pzp ptp ppp traj0 lc region
     
     end % end iline loop
-
+    
+    if (exist('ip_fid','var') && ip_fid>0)
+        fclose(ip_fid);
+    end
