@@ -27,11 +27,30 @@ end
 % Mesh resolution info
 %nx = 260; ny = 128; nz = 256; zperiod = 1;
 
-gridfile = '/Users/dpn/proj/bout++/poincare/boutpp_poincare/data/kstar_30306_7850_psi085105_nx260ny128_f2_v0.nc';
-aparfile = '/Users/dpn/proj/bout++/poincare/boutpp_poincare/data/apar_kstar_30306_7850_psi085105_nx260ny128_f2_nz256.mat';
-%nx = 132; ny = 64; nz = 320; zperiod = 5;
-nx = 260; ny = 128; nz = 256; zperiod = 1;
-divertor = 1;
+divertorCase = 1;
+
+if divertorCase == 0
+    gridfile =  '../kstar_30306_7850_psi085105_nx260ny128_f2_v0.nc';
+    gridfile = "/Users/dpn/proj/bout++/poincare/boutpp_poincare/data/kstar_30306_7850_psi085105_nx260ny128_f2_v0.nc";
+    divertor = 0;
+    nx = 516; ny = 64; nz = 64;
+    zperiod = 5;
+elseif divertorCase == 1
+    gridfile = '/Users/dpn/proj/bout++/poincare/boutpp_poincare/data/kstar_30306_7850_psi085105_nx260ny128_f2_v0.nc';
+    aparfile = '/Users/dpn/proj/bout++/poincare/boutpp_poincare/data/apar_kstar_30306_7850_psi085105_nx260ny128_f2_nz256.mat';
+    divertor = 1;
+    nx = 260; ny = 128; nz = 256;
+    zperiod = 5;
+else
+    fprintf('to be implemented!');
+    die();
+end
+
+%gridfile = '/Users/dpn/proj/bout++/poincare/boutpp_poincare/data/kstar_30306_7850_psi085105_nx260ny128_f2_v0.nc';
+%aparfile = '/Users/dpn/proj/bout++/poincare/boutpp_poincare/data/apar_kstar_30306_7850_psi085105_nx260ny128_f2_nz256.mat';
+%%nx = 132; ny = 64; nz = 320; zperiod = 5;
+%nx = 260; ny = 128; nz = 256; zperiod = 1;
+%divertor = 1;
 
 % Field-line tracing direction: 1 (y index increasing); -1 (y index decreasing)
 direction = 1; 
@@ -385,7 +404,7 @@ yiarray = (1:ny);
     for ix=1:ixsep
         zarray_rshift=mod(zarray(1:nzG)-sa(ix),zmax);
         dxdy_m1(ix,:)=spline(zarray,dxdyt(ix,:),zarray_rshift);
-        dzdy_m1(ix,:)=spline(zarray,dzdyt(ix,:),zarray_rshift); 
+        dzdy_m1(ix,:)=spline(zarray,dzdyt(ix,:),zarray_rshift);
     end
     
     fprintf('Starting field-line tracing ...\n');
