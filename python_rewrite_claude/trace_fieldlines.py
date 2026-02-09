@@ -404,6 +404,8 @@ def main():
 
     ip_fid = open('ip_xyz.txt', 'w')
     ip_fid.write('iline it ipx ipy ipz\n')
+    ip_thetapsi_fid = open('ip_thetapsi.txt', 'w')
+    ip_thetapsi_fid.write('iline theta psi\n')
     traj_fid = open('traj_xyz.txt', 'w')
     traj_fid.write('iline it x y z\n')
 
@@ -761,6 +763,12 @@ def main():
                             np.interp(yind_tmp, yiarray_cfr, theta_cfr))
                         ppsi[ip] = float(
                             np.interp(xind_tmp, xiarray, xarray))
+
+                        # Write theta (converted to radians 0-2π) and psi
+                        theta_rad = ptheta[ip] * np.pi  # Convert from π units to radians
+                        ip_thetapsi_fid.write(
+                            f"{iline} {theta_rad:.16g} {ppsi[ip]:.16g}\n")
+
                         ip += 1
 
                 print(f"\t\tline {iline} has {ip}(+{id_count}) "
@@ -813,6 +821,7 @@ def main():
     # End iline loop
 
     ip_fid.close()
+    ip_thetapsi_fid.close()
     traj_fid.close()
 
     print("\nField-line tracing complete.")

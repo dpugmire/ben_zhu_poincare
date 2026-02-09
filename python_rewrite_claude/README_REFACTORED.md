@@ -77,6 +77,10 @@ This will:
 
 - **`ip_xyz.txt`**: Puncture points (intersections with the poloidal plane)
   - Format: `iline it ipx ipy ipz`
+- **`ip_thetapsi.txt`**: Theta and psi values at puncture points
+  - Format: `iline theta psi`
+  - theta is in radians (0 to 2π)
+  - psi is the poloidal flux value
 - **`traj_xyz.txt`**: Complete 3D trajectories
   - Format: `iline it x y z`
 
