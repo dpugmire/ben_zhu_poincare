@@ -69,11 +69,11 @@ void trace_field_lines(const FieldData& field, const TraceOptions& options) {
         throw std::runtime_error("nturns and nlines must be > 0");
     }
 
-    std::vector<int> lines = options.lines;
+    std::vector<float> lines = options.lines;
     if (lines.empty()) {
         lines.reserve(options.nlines);
         for (int i = 1; i <= options.nlines; ++i) {
-            lines.push_back(i);
+            lines.push_back(static_cast<float>(i));
         }
     }
 
@@ -98,14 +98,14 @@ void trace_field_lines(const FieldData& field, const TraceOptions& options) {
     std::cout << "Starting field-line tracing ..." << std::endl;
 
     for (size_t iline_i = 0; iline_i < lines.size(); ++iline_i) {
-        const int iline = lines[iline_i];
-        if (iline < 1 || iline > field.nx) {
+        const float iline = lines[iline_i];
+        if (iline < 1.0f || iline > static_cast<float>(field.nx)) {
             std::cout << "  Skipping invalid line index " << iline << std::endl;
             continue;
         }
 
-        float xind = static_cast<float>(iline);
-        float xStart = field.psixy[field.idx2(iline - 1, field.jyomp)];
+        float xind = iline;
+        float xStart = field.interp1(field.xiarray, field.xarray, xind);
         int yyy = field.jyomp + 1;
         int yStart = yyy;
         int zzz = 1;
