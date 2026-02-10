@@ -30,13 +30,13 @@ end
 % Mesh resolution info
 %nx = 260; ny = 128; nz = 256; zperiod = 1;
 
-divertorCase = 1;
+divertorCase = 0;
 
 if divertorCase == 0
     gridfile =  '/Users/dpn/proj/bout++/nersc_data/circle-zonal/cbm18_dens3_0.5BS_516nx64ny.grid.nc';
     aparfile = '/Users/dpn/proj/bout++/nersc_data/circle-zonal/apar_cbm18_dens3_0.5BS_516nx64ny64nz_t500.npy';
-    apar = readNPY(aparfile);
-    fprintf('Apar shape=%s\n', mat2str(size(apar)));
+    apar_in = readNPY(aparfile);
+    fprintf('Apar shape=%s\n', mat2str(size(apar_in)));
     divertor = 0;
     nx = 516; ny = 64; nz = 64;
     zperiod = 5;
@@ -45,7 +45,7 @@ elseif divertorCase == 1
     gridfile = '/Users/dpn/proj/bout++/poincare/boutpp_poincare/data/kstar_30306_7850_psi085105_nx260ny128_f2_v0.nc';
     %aparfile = '/Users/dpn/proj/bout++/poincare/boutpp_poincare/data/apar_kstar_30306_7850_psi085105_nx260ny128_f2_nz256.mat';
     aparfile = '/Users/dpn/proj/bout++/nersc_data/xpoint_singlenull/apar_kstar_30306_7850_psi085105_nx260ny128_f2_nz256.mat'
-    apar=load(aparfile).apar;
+    apar_in=load(aparfile).apar;
 
     divertor = 1;
     nx = 260; ny = 128; nz = 256;
@@ -62,14 +62,14 @@ end
 %divertor = 1;
 
 % Field-line tracing direction: 1 (y index increasing); -1 (y index decreasing)
-direction = 1; 
+direction = 1;
 % Individual field-lines to be traced radially
 nlines = 256; % number of field-lines in radial direction
 deltaix = 1; ixoffset = 1; % by default, line tracing starts at 
                            % index space (deltaix*ilines+ixoffset, iy, iz)
 % (Roughly) total poloidal turns
 nturns = 250;
-nturns = 25;
+nturns = 100;
 nsteps = nturns*ny;
 np = 1250; % maximum puncture points, rougly nturns*q
 % Output option
@@ -347,11 +347,11 @@ yiarray = (1:ny);
 
     if (divertor == 0)
         [apar0,dapardx0,dapardy0,dapardz0] = ...
-            get_apar_sc(apar,bxy,psixy,zShift,sa,sinty,dy0,dz,...
+            get_apar_sc(apar_in,bxy,psixy,zShift,sa,sinty,dy0,dz,...
             zperiod,0,1,0);
     elseif (divertor == 1)
         [apar0,dapardx0,dapardy0,dapardz0] = ...
-            get_apar_sn(apar,bxy,psixy,zShift,sa,sinty,dy0,dz,...
+            get_apar_sn(apar_in,bxy,psixy,zShift,sa,sinty,dy0,dz,...
             ixsep,nypf1,nypf2,zperiod,0,1,0);
     else
         fprintf('\tConfiguration to be implemented!');
@@ -440,6 +440,7 @@ yiarray = (1:ny);
     %parfor iline = 1:nlines
     LINES = 1:nlines;
     LINES = [50, 100, 150];
+    LINES = [151]
     for iline = LINES
         % pick starting points
         xind = iline;
@@ -517,6 +518,7 @@ yiarray = (1:ny);
                 if (direction == 1)
                     [xEnd,zEnd]=RK4_FLT1(xStart,yStart,zStart,dxdy,dzdy,xarray,zarray,region,dxdy_p1,dzdy_p1,1,nypf1,nypf2);
                     yEnd = yStart+1;
+                    %%% fprintf("RK4: %f %f %f --> %f %f %f\n",xStart,yStart,zStart, xEnd, yEnd, zEnd);
                 elseif (direction == -1)
                     [xEnd,zEnd]=RK4_FLT1(xStart,yStart,zStart,dxdy,dzdy,xarray,zarray,region,dxdy_m1,dzdy_m1,-1,nypf1,nypf2);
                     yEnd = yStart-1;
