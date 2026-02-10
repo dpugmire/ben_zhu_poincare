@@ -204,4 +204,4 @@ python trace_fieldlines.py --apar-file apar_circular.nc --grid-file /Users/dpn/p
 
 python generate_apar_data.py --grid-file /Users/dpn/proj/bout++/poincare/boutpp_poincare/data/kstar_30306_7850_psi085105_nx260ny128_f2_v0.nc --apar-file /Users/dpn/proj/bout++/nersc_data/xpoint_singlenull/apar_kstar_30306_7850_psi085105_nx260ny128_f2_nz256.mat --zperiod 5 --output apar_single.nc
 
-python trace_fieldlines.py --apar-file apar_single.nc --grid-file /Users/dpn/proj/bout++/poincare/boutpp_poincare/data/kstar_30306_7850_psi085105_nx260ny128_f2_v0.nc --lines "50,75,100,125,150"
+python trace_fieldlines.py --apar-file apar_single.nc --grid-file /Users/dpn/proj/bout++/poincare/boutpp_poincare/data/kstar_30306_7850_psi085105_nx260ny128_f2_v0.nc --lines "200,225,250"

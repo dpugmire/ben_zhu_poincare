@@ -35,10 +35,13 @@ def main():
                         help='Tracing direction: 1 (forward) or -1 (backward)')
     parser.add_argument('--nlines', type=int, default=256,
                         help='Number of field lines to trace')
+    parser.add_argument('--range', dest='line_range', nargs=3, metavar=('X0', 'X1', 'N'),
+                        default=None,
+                        help='Trace N line values between X0 and X1 (supports floating point X0/X1)')
     parser.add_argument('--nturns', type=int, default=25,
                         help='Approximate number of poloidal turns')
     parser.add_argument('--lines', type=str, default=None,
-                        help='Comma-separated list of specific lines to trace (e.g., "50,75,100")')
+                        help='Comma-separated list of specific line values to trace (e.g., "50,75,100.5")')
     args = parser.parse_args()
 
     # --------------------------------------------------------------------------
@@ -410,15 +413,35 @@ def main():
     traj_fid.write('iline it x y z\n')
 
     # Which lines to trace
-    if args.lines is not None:
-        LINES = [int(x.strip()) for x in args.lines.split(',')]
+    if args.line_range is not None:
+        x0_str, x1_str, n_str = args.line_range
+        try:
+            x0 = float(x0_str)
+            x1 = float(x1_str)
+            n_samples = int(n_str)
+        except ValueError:
+            parser.error('--range expects X0 X1 N where X0/X1 are float and N is int')
+        if n_samples <= 0:
+            parser.error('--range requires N > 0')
+        LINES = np.linspace(x0, x1, n_samples, dtype=float).tolist()
+    elif args.lines is not None:
+        try:
+            LINES = [float(x.strip()) for x in args.lines.split(',') if x.strip()]
+        except ValueError:
+            parser.error('--lines must be a comma-separated list of numeric values')
+        if len(LINES) == 0:
+            parser.error('--lines list is empty')
     else:
         LINES = list(range(1, nlines + 1))
 
     for iline in LINES:
+        if iline < 1 or iline > nx:
+            print(f"\tSkipping line {iline:.16g}: outside valid index range [1, {nx}]")
+            continue
+
         # Pick starting point (1-based indices)
         xind = float(iline)
-        xStart = psixy[iline - 1, jyomp - 1]  # psi value
+        xStart = float(np.interp(xind, xiarray, xarray))  # psi value (supports float xind)
         yyy = jyomp  # 1-based
         yStart = jyomp  # 1-based
         zzz = 1  # 1-based (for filename)
