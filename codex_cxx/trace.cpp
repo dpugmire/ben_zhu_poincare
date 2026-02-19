@@ -59,6 +59,195 @@ float interp_xindex_2d(const FieldData& field,
     return v0 + tx * (v1 - v0);
 }
 
+struct CrossingEval {
+    float xind;
+    float yind;
+    float zvalue;
+    float ipx;
+    float ipy;
+    float ipz;
+};
+
+CrossingEval evaluate_crossing(const FieldData& field,
+                               const std::vector<float>& traj,
+                               int nsteps,
+                               int tc0,
+                               int tc1,
+                               int direction,
+                               float alpha) {
+    if (alpha < 0.0f) alpha = 0.0f;
+    if (alpha > 1.0f) alpha = 1.0f;
+    const float beta = 1.0f - alpha;
+
+    float xind_tmp = beta * get_traj(traj, 1, tc0, nsteps) + alpha * get_traj(traj, 1, tc1, nsteps);
+    float yind_tmp = beta * get_traj(traj, 2, tc0, nsteps) + alpha * get_traj(traj, 2, tc1, nsteps);
+
+    float zvalue = beta * get_traj(traj, 6, tc0, nsteps) + alpha * get_traj(traj, 6, tc1, nsteps);
+    if (std::fabs(get_traj(traj, 6, tc0, nsteps) - get_traj(traj, 6, tc1, nsteps)) > 1.0f) {
+        float z0w = field.wrap_z(get_traj(traj, 6, tc0, nsteps));
+        float z1w = field.wrap_z(get_traj(traj, 6, tc1, nsteps));
+        zvalue = beta * z0w + alpha * z1w;
+    }
+
+    if (static_cast<int>(std::round(get_traj(traj, 2, tc0, nsteps))) == field.nypf2 &&
+        direction == 1 &&
+        xind_tmp < static_cast<float>(field.ixsep) + 0.5f) {
+        yind_tmp = beta * get_traj(traj, 2, tc0, nsteps) + alpha * static_cast<float>(field.nypf2 + 1);
+    } else if (static_cast<int>(std::round(get_traj(traj, 2, tc0, nsteps))) == (field.nypf1 + 1) &&
+               direction == -1 &&
+               xind_tmp < static_cast<float>(field.ixsep) + 0.5f) {
+        yind_tmp = beta * static_cast<float>(field.nypf2 + 1) + alpha * get_traj(traj, 2, tc1, nsteps);
+        float shiftangle = field.interp1(field.xiarray, field.sa, xind_tmp);
+        zvalue = field.wrap_z(zvalue - shiftangle);
+    } else if (tc0 > 0) {
+        int y_prev = static_cast<int>(std::round(get_traj(traj, 2, tc0 - 1, nsteps)));
+        if (y_prev == field.nypf2 || y_prev == (field.nypf1 + 1)) {
+            float z0 = field.interp1(field.ziarray, field.zarray, get_traj(traj, 3, tc0, nsteps));
+            float z1 = field.interp1(field.ziarray, field.zarray, get_traj(traj, 3, tc1, nsteps));
+            zvalue = beta * z0 + alpha * z1;
+        }
+    }
+    zvalue = field.wrap_z(zvalue);
+
+    float rxyvalue = 0.0f;
+    float zxyvalue = 0.0f;
+    float zsvalue = 0.0f;
+    if (xind_tmp < static_cast<float>(field.ixsep) + 0.5f) {
+        rxyvalue = field.interp2_rect(field.xiarray_cfr, field.yiarray_cfr, field.rxy_cfr,
+                                      field.ixsep, field.ny_cfr, xind_tmp, yind_tmp);
+        zxyvalue = field.interp2_rect(field.xiarray_cfr, field.yiarray_cfr, field.zxy_cfr,
+                                      field.ixsep, field.ny_cfr, xind_tmp, yind_tmp);
+        zsvalue = field.interp2_rect(field.xiarray_cfr, field.yiarray_cfr, field.zs_cfr,
+                                     field.ixsep, field.ny_cfr, xind_tmp, yind_tmp);
+    } else {
+        rxyvalue = field.interp2_rect(field.xiarray, field.yiarray, field.rxy,
+                                      field.nx, field.ny, xind_tmp, yind_tmp);
+        zxyvalue = field.interp2_rect(field.xiarray, field.yiarray, field.zxy,
+                                      field.nx, field.ny, xind_tmp, yind_tmp);
+        zsvalue = field.interp2_rect(field.xiarray, field.yiarray, field.zShift,
+                                     field.nx, field.ny, xind_tmp, yind_tmp);
+    }
+
+    float ipx3d_tmp = rxyvalue * std::cos(zsvalue);
+    float ipy3d_tmp = rxyvalue * std::sin(zsvalue);
+    float ipx = ipx3d_tmp * std::cos(zvalue) - ipy3d_tmp * std::sin(zvalue);
+    float ipy = ipx3d_tmp * std::sin(zvalue) + ipy3d_tmp * std::cos(zvalue);
+
+    CrossingEval out;
+    out.xind = xind_tmp;
+    out.yind = yind_tmp;
+    out.zvalue = zvalue;
+    out.ipx = ipx;
+    out.ipy = ipy;
+    out.ipz = zxyvalue;
+    return out;
+}
+
+CrossingEval refine_crossing_root(const FieldData& field,
+                                  const std::vector<float>& traj,
+                                  int nsteps,
+                                  int tc0,
+                                  int tc1,
+                                  int direction,
+                                  float x0,
+                                  float x1) {
+    const float tiny = 1.0e-20f;
+    float alpha_linear = 0.5f;
+    float denom = x1 - x0;
+    if (std::fabs(denom) > tiny) {
+        alpha_linear = -x0 / denom;
+    }
+    if (alpha_linear < 0.0f) alpha_linear = 0.0f;
+    if (alpha_linear > 1.0f) alpha_linear = 1.0f;
+
+    CrossingEval eval0 = evaluate_crossing(field, traj, nsteps, tc0, tc1, direction, 0.0f);
+    CrossingEval eval1 = evaluate_crossing(field, traj, nsteps, tc0, tc1, direction, 1.0f);
+    CrossingEval best = evaluate_crossing(field, traj, nsteps, tc0, tc1, direction, alpha_linear);
+    float best_abs = std::fabs(best.ipx);
+
+    if (std::fabs(eval0.ipx) < best_abs) {
+        best = eval0;
+        best_abs = std::fabs(best.ipx);
+    }
+    if (std::fabs(eval1.ipx) < best_abs) {
+        best = eval1;
+        best_abs = std::fabs(best.ipx);
+    }
+
+    float f0 = eval0.ipx;
+    float f1 = eval1.ipx;
+    if (f0 == 0.0f) return eval0;
+    if (f1 == 0.0f) return eval1;
+
+    auto bisect_bracket = [&](float lo, float hi, float flo, float fhi) {
+        for (int iter = 0; iter < 48; ++iter) {
+            float mid = 0.5f * (lo + hi);
+            CrossingEval emid = evaluate_crossing(field, traj, nsteps, tc0, tc1, direction, mid);
+            float fmid = emid.ipx;
+            float abs_mid = std::fabs(fmid);
+            if (abs_mid < best_abs) {
+                best = emid;
+                best_abs = abs_mid;
+            }
+            if (abs_mid < 1.0e-10f) {
+                break;
+            }
+
+            if (flo * fmid <= 0.0f) {
+                hi = mid;
+                fhi = fmid;
+            } else {
+                lo = mid;
+                flo = fmid;
+            }
+        }
+
+        float secant_denom = fhi - flo;
+        if (std::fabs(secant_denom) > tiny) {
+            float a_sec = lo - flo * (hi - lo) / secant_denom;
+            if (a_sec >= lo && a_sec <= hi) {
+                CrossingEval esec = evaluate_crossing(field, traj, nsteps, tc0, tc1, direction, a_sec);
+                float abs_sec = std::fabs(esec.ipx);
+                if (abs_sec < best_abs) {
+                    best = esec;
+                    best_abs = abs_sec;
+                }
+            }
+        }
+    };
+
+    if (f0 * f1 < 0.0f) {
+        bisect_bracket(0.0f, 1.0f, f0, f1);
+        return best;
+    }
+
+    // Fallback for non-monotonic geometry interpolation: scan for a local sign change.
+    const int nscan = 32;
+    float a_prev = 0.0f;
+    float f_prev = f0;
+    for (int i = 1; i <= nscan; ++i) {
+        float a = static_cast<float>(i) / static_cast<float>(nscan);
+        CrossingEval ei = evaluate_crossing(field, traj, nsteps, tc0, tc1, direction, a);
+        float fi = ei.ipx;
+        float abs_i = std::fabs(fi);
+        if (abs_i < best_abs) {
+            best = ei;
+            best_abs = abs_i;
+        }
+        if (fi == 0.0f) {
+            return ei;
+        }
+        if (f_prev * fi < 0.0f) {
+            bisect_bracket(a_prev, a, f_prev, fi);
+            break;
+        }
+        a_prev = a;
+        f_prev = fi;
+    }
+
+    return best;
+}
+
 }  // namespace
 
 void trace_field_lines(const FieldData& field, const TraceOptions& options) {
@@ -332,75 +521,22 @@ void trace_field_lines(const FieldData& field, const TraceOptions& options) {
                     continue;
                 }
 
-                float a = -x0 / denom;
-                if (a < 0.0f || a > 1.0f) {
-                    continue;
-                }
-                float b = 1.0f - a;
-
                 int tc0 = istep - 1;
                 int tc1 = istep;
-
-                float xind_tmp = b * get_traj(traj, 1, tc0, nsteps) + a * get_traj(traj, 1, tc1, nsteps);
-                float yind_tmp = b * get_traj(traj, 2, tc0, nsteps) + a * get_traj(traj, 2, tc1, nsteps);
-
-                float zvalue = b * get_traj(traj, 6, tc0, nsteps) + a * get_traj(traj, 6, tc1, nsteps);
-                if (std::fabs(get_traj(traj, 6, tc0, nsteps) - get_traj(traj, 6, tc1, nsteps)) > 1.0f) {
-                    float z0w = field.wrap_z(get_traj(traj, 6, tc0, nsteps));
-                    float z1w = field.wrap_z(get_traj(traj, 6, tc1, nsteps));
-                    zvalue = b * z0w + a * z1w;
-                }
-
-                if (static_cast<int>(std::round(get_traj(traj, 2, tc0, nsteps))) == field.nypf2 &&
-                    options.direction == 1 &&
-                    xind_tmp < static_cast<float>(field.ixsep) + 0.5f) {
-                    yind_tmp = b * get_traj(traj, 2, tc0, nsteps) + a * static_cast<float>(field.nypf2 + 1);
-                } else if (static_cast<int>(std::round(get_traj(traj, 2, tc0, nsteps))) == (field.nypf1 + 1) &&
-                           options.direction == -1 &&
-                           xind_tmp < static_cast<float>(field.ixsep) + 0.5f) {
-                    yind_tmp = b * static_cast<float>(field.nypf2 + 1) + a * get_traj(traj, 2, tc1, nsteps);
-                    float shiftangle = field.interp1(field.xiarray, field.sa, xind_tmp);
-                    zvalue = field.wrap_z(zvalue - shiftangle);
-                } else if (tc0 > 0) {
-                    int y_prev = static_cast<int>(std::round(get_traj(traj, 2, tc0 - 1, nsteps)));
-                    if (y_prev == field.nypf2 || y_prev == (field.nypf1 + 1)) {
-                        float z0 = field.interp1(field.ziarray, field.zarray, get_traj(traj, 3, tc0, nsteps));
-                        float z1v = field.interp1(field.ziarray, field.zarray, get_traj(traj, 3, tc1, nsteps));
-                        zvalue = b * z0 + a * z1v;
-                    }
-                }
-                zvalue = field.wrap_z(zvalue);
-
-                float rxyvalue = 0.0f;
-                float zxyvalue = 0.0f;
-                float zsvalue = 0.0f;
-                if (xind_tmp < static_cast<float>(field.ixsep) + 0.5f) {
-                    rxyvalue = field.interp2_rect(field.xiarray_cfr, field.yiarray_cfr, field.rxy_cfr,
-                                                  field.ixsep, field.ny_cfr, xind_tmp, yind_tmp);
-                    zxyvalue = field.interp2_rect(field.xiarray_cfr, field.yiarray_cfr, field.zxy_cfr,
-                                                  field.ixsep, field.ny_cfr, xind_tmp, yind_tmp);
-                    zsvalue = field.interp2_rect(field.xiarray_cfr, field.yiarray_cfr, field.zs_cfr,
-                                                 field.ixsep, field.ny_cfr, xind_tmp, yind_tmp);
-                } else {
-                    rxyvalue = field.interp2_rect(field.xiarray, field.yiarray, field.rxy,
-                                                  field.nx, field.ny, xind_tmp, yind_tmp);
-                    zxyvalue = field.interp2_rect(field.xiarray, field.yiarray, field.zxy,
-                                                  field.nx, field.ny, xind_tmp, yind_tmp);
-                    zsvalue = field.interp2_rect(field.xiarray, field.yiarray, field.zShift,
-                                                 field.nx, field.ny, xind_tmp, yind_tmp);
-                }
-
-                float ipx3d_tmp = rxyvalue * std::cos(zsvalue);
-                float ipy3d_tmp = rxyvalue * std::sin(zsvalue);
-                float ipx = ipx3d_tmp * std::cos(zvalue) - ipy3d_tmp * std::sin(zvalue);
-                float ipy = ipx3d_tmp * std::sin(zvalue) + ipy3d_tmp * std::cos(zvalue);
-                float ipz = zxyvalue;
+                CrossingEval cross =
+                    refine_crossing_root(field, traj, nsteps, tc0, tc1, options.direction, x0, x1);
+                float xind_tmp = cross.xind;
+                float yind_tmp = cross.yind;
+                float ipy = cross.ipy;
+                float ipz = cross.ipz;
 
                 if (ipy > 0.0f) {
-                    px[ip] = ipx;
+                    // Puncture points are by definition on the x=0 plane.
+                    float ipx_out = 0.0f;
+                    px[ip] = ipx_out;
                     py[ip] = ipy;
                     pz[ip] = ipz;
-                    ip_xyz << iline << " " << istep << " " << ipx << " " << ipy << " " << ipz << "\n";
+                    ip_xyz << iline << " " << istep << " " << ipx_out << " " << ipy << " " << ipz << "\n";
 
                     ptheta[ip] = field.interp1(field.yiarray_cfr, field.theta_cfr, yind_tmp);
                     ppsi[ip] = field.interp1(field.xiarray, field.xarray, xind_tmp);
