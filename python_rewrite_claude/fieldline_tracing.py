@@ -45,7 +45,7 @@ args = parser.parse_args()
 # STEP 1: User setup
 # --------------------------------------------------------------------------
 
-divertorCase = 1
+divertorCase = 0
 
 if divertorCase == 0:
     gridfile = '/Users/dpn/proj/bout++/nersc_data/circle-zonal/cbm18_dens3_0.5BS_516nx64ny.grid.nc'
@@ -85,7 +85,7 @@ nlines = 256
 deltaix = 1; ixoffset = 1
 
 # (Roughly) total poloidal turns
-nturns = 25
+nturns = 100
 nsteps = nturns * ny
 np_max = 1250  # maximum puncture points
 
@@ -468,6 +468,7 @@ traj_fid.write('iline it x y z\n')
 # Which lines to trace (override with specific lines for testing)
 LINES = list(range(1, nlines + 1))
 LINES = [50, 75, 100, 125, 150]
+LINES = [150]
 
 for iline in LINES:
     # Pick starting point (1-based indices)

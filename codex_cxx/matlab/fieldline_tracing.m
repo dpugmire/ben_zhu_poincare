@@ -16,8 +16,8 @@ set(groot,'DefaultLineMarkerSize',12);
 if exist('OCTAVE_VERSION', 'builtin') ~= 0
     disp('Running in Octave');
     pkg load netcdf; %% for octave
-    %addpath('/Users/dpn/proj/bout++/ben_zhu_poincare/npy-matlab/npy-matlab');
-    addpath('./npy-matlab/npy-matlab');
+    addpath('/Users/dpn/proj/bout++/ben_zhu_poincare/npy-matlab/npy-matlab');
+    %addpath('./npy-matlab/npy-matlab');
 
 else
     disp('Running in MATLAB');
@@ -30,7 +30,7 @@ end
 % Mesh resolution info
 %nx = 260; ny = 128; nz = 256; zperiod = 1;
 
-divertorCase = 1;
+divertorCase = 0;
 
 if divertorCase == 0
     gridfile =  '/Users/dpn/proj/bout++/nersc_data/circle-zonal/cbm18_dens3_0.5BS_516nx64ny.grid.nc';
@@ -69,7 +69,7 @@ deltaix = 1; ixoffset = 1; % by default, line tracing starts at
                            % index space (deltaix*ilines+ixoffset, iy, iz)
 % (Roughly) total poloidal turns
 nturns = 250;
-nturns = 100;
+nturns = 50;
 nsteps = nturns*ny;
 np = 1250; % maximum puncture points, rougly nturns*q
 % Output option
@@ -440,7 +440,7 @@ yiarray = (1:ny);
     %parfor iline = 1:nlines
     LINES = 1:nlines;
     LINES = [50, 100, 150];
-    LINES = [151]
+    #LINES = [151]
     for iline = LINES
         % pick starting points
         xind = iline;

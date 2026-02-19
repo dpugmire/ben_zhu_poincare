@@ -98,9 +98,9 @@ void trace_field_lines(const FieldData& field, const TraceOptions& options) {
     std::cout << "Starting field-line tracing ..." << std::endl;
 
     for (size_t iline_i = 0; iline_i < lines.size(); ++iline_i) {
-      const float iline = lines[iline_i];
+        const float iline = lines[iline_i];
         if (iline < 1.0f || iline > static_cast<float>(field.nx)) {
-	  std::cout << "  Skipping invalid line index " << iline << "max= "<<field.nx<<std::endl;
+            std::cout << "  Skipping invalid line index " << iline << std::endl;
             continue;
         }
 
