@@ -10,6 +10,9 @@ public:
     void writeLineOutputs(const LineTraceResult& line,
                           const std::string& outputDir,
                           const std::string& divertorTag) const;
+
+    void writeCombinedOutputs(const std::vector<LineTraceResult>& lines,
+                              const std::string& outputDir) const;
 };
 
 #endif

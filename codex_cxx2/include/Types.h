@@ -32,7 +32,7 @@ struct PuncturePoint {
 };
 
 struct LineTraceResult {
-    int iline = 0;
+    double iline = 0.0;
     int endRegion = 0;
     double connectionLength = 0.0;
     std::vector<TrajectoryState> states;

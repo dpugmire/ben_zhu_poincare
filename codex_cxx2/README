@@ -1,0 +1,11 @@
+# trace-only (default), using --nlines, writes combined files:
+#   outputs/ip_cxx.txt
+#   outputs/traj_cxx.txt
+./build/trace_fieldlines \
+  --divertor single \
+  --single-apar /Users/dpn/proj/bout++/ben_zhu_poincare/apar.single.nc \
+  --nlines 150.5 151.5 5 \
+  --nturns 100 \
+  --direction 1 \
+  --output-dir ./outputs
+  

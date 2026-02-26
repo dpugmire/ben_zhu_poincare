@@ -42,20 +42,20 @@ void FieldLineIntegrator::rk4Step(double xStart,
     zEnd = zStart + direction * h6 * (dzdy1 + 2.0 * dzdy2 + 2.0 * dzdy3 + dzdy4);
 }
 
-LineTraceResult FieldLineIntegrator::traceLine(int iline, const TraceOptions& options) const {
+LineTraceResult FieldLineIntegrator::traceLine(double iline, const TraceOptions& options) const {
     const AparData& d = model_.data();
 
     LineTraceResult out;
     out.iline = iline;
 
-    if (iline < 1 || iline > d.nx) {
+    if (iline < 1.0 || iline > static_cast<double>(d.nx)) {
         out.endRegion = 99;
         return out;
     }
 
     const int nsteps = options.nturns * d.ny;
 
-    double xind = static_cast<double>(iline);
+    double xind = iline;
     double xStart = model_.interp1(d.xiarray, d.xarray, xind);
     int yStart = d.jyomp + 1;
     double zStart = d.zarray.empty() ? 0.0 : d.zarray.front();
