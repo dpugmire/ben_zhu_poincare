@@ -30,9 +30,11 @@ end
 % Mesh resolution info
 %nx = 260; ny = 128; nz = 256; zperiod = 1;
 
-divertorCase = 1;
+divertorCase = 0;
+dumpApar = 0;
 
 if divertorCase == 0
+    config_tab = 'circ';
     gridfile =  '/Users/dpn/proj/bout++/nersc_data/circle-zonal/cbm18_dens3_0.5BS_516nx64ny.grid.nc';
     aparfile = '/Users/dpn/proj/bout++/nersc_data/circle-zonal/apar_cbm18_dens3_0.5BS_516nx64ny64nz_t500.npy';
     apar_in = readNPY(aparfile);
@@ -42,6 +44,7 @@ if divertorCase == 0
     zperiod = 5;
     %zperiod = 1; % should be 5?
 elseif divertorCase == 1
+    config_tab = 'single';
     gridfile = '/Users/dpn/proj/bout++/poincare/boutpp_poincare/data/kstar_30306_7850_psi085105_nx260ny128_f2_v0.nc';
     %aparfile = '/Users/dpn/proj/bout++/poincare/boutpp_poincare/data/apar_kstar_30306_7850_psi085105_nx260ny128_f2_nz256.mat';
     aparfile = '/Users/dpn/proj/bout++/nersc_data/xpoint_singlenull/apar_kstar_30306_7850_psi085105_nx260ny128_f2_nz256.mat'
@@ -49,7 +52,7 @@ elseif divertorCase == 1
 
     divertor = 1;
     nx = 260; ny = 128; nz = 256;
-    zperiod = 1; % should be 5?
+    zperiod = 5; % should be 5?
 else
     fprintf('to be implemented!');
     error('Exiting now.');
@@ -355,7 +358,8 @@ yiarray = (1:ny);
             ixsep,nypf1,nypf2,zperiod,0,1,0);
     else
         fprintf('\tConfiguration to be implemented!');
-    end    
+    end
+
 
     if (size(apar0,3) == nzG)
         apar = apar0;
@@ -427,21 +431,32 @@ yiarray = (1:ny);
         dxdy_m1(ix,:)=spline(zarray,dxdyt(ix,:),zarray_rshift);
         dzdy_m1(ix,:)=spline(zarray,dzdyt(ix,:),zarray_rshift);
     end
+
+    if dumpApar == 1
+        printf('Dumping apar and its derivatives ...\n');
+        outFile = sprintf('apar.%s.nc', config_tab);
+        dump_fieldline_data(outFile, nx, ny, nz, zperiod, ixsep1, ixsep2, nypf1, nypf2, rxy, zxy, rxy_cfr, zxy_cfr, sa, zShift, zs_cfr, psixy, dxdy, dzdy, dxdy_p1, dzdy_p1, dxdy_m1, dzdy_m1);
+        exit(0);
+    end
     
     fprintf('Starting field-line tracing ...\n');
     fprintf('\n');
 
     cm = jet(nlines);
-    ip_fid = fopen('ip_xyz.txt','w');
+    ip_fid = fopen(['ip_matlab.',config_tab,'.txt'],'w');
     fprintf(ip_fid,'iline it ipx ipy ipz\n');
-    traj_fid = fopen('traj_xyz.txt','w');
+    traj_fid = fopen(['traj_matlab.',config_tab,'.txt'],'w');
     fprintf(traj_fid,'iline it x y z\n');
 
     %parfor iline = 1:nlines
     LINES = 1:nlines;
     LINES = [50, 100, 150];
-    LINES = [151]
+    LINES = [101, 201, 301, 401, 501];
     for iline = LINES
+        ip_line_fid = fopen(['ip_matlab.',config_tab,'.', int2str(iline),'.txt'],'w');
+        fprintf(ip_line_fid,'iline it ipx ipy ipz\n');
+        traj_line_fid = fopen(['traj_matlab.',config_tab,'.', int2str(iline),'.txt'],'w');
+        fprintf(traj_line_fid,'iline it x y z\n');
         % pick starting points
         xind = iline;
         xStart = psixy(xind,jyomp); % note here jyomp doesn't matter
@@ -498,7 +513,7 @@ yiarray = (1:ny);
 
         while (region < 10 && iturn < nturns)
 
-            if (mod(iturn,50) == 1) 
+            if (mod(iturn,5) == 1)
                 fprintf('\t\t line%i, turn %i/%i ...\n',iline,iturn,nturns);
             end
 
@@ -640,7 +655,7 @@ yiarray = (1:ny);
                 zind = interp1(zarray, ziarray, zEnd);
                 
                 it = it+1;
-                traj(1,it) = iturn; 
+                traj(1,it) = iturn;
                 traj(2,it) = xind;
                 traj(3,it) = yEnd;
                 traj(4,it) = zind;
@@ -705,6 +720,8 @@ yiarray = (1:ny);
     end
     for istep=1:itmax
         fprintf(traj_fid,'%d %d %.16g %.16g %.16g\n',iline,istep, ...
+            fl_x3d(istep),fl_y3d(istep),fl_z3d(istep));
+        fprintf(traj_line_fid,'%d %d %.16g %.16g %.16g\n',iline,istep, ...
             fl_x3d(istep),fl_y3d(istep),fl_z3d(istep));
     end
  
@@ -797,7 +814,8 @@ yiarray = (1:ny);
                 py(ip)=ipy;
                 pz(ip)=ipz;
                 fprintf(ip_fid,'%d %d %.16g %.16g %.16g\n',iline,it,ipx,ipy,ipz);
-            
+                fprintf(ip_line_fid,'%d %d %.16g %.16g %.16g\n',iline,it,ipx,ipy,ipz);
+
                 ptheta(ip)=interp1(yiarray_cfr,theta_cfr,yind_tmp);
                 ppsi(ip)=interp1(xiarray,xarray,xind_tmp);
             %end
@@ -864,7 +882,8 @@ yiarray = (1:ny);
     end % end itmax>1
     
     %clear traj fl_x3d fl_y3d fl_z3d fit ffl_x3d iit px py pz ptheta ppsi pxp pyp pzp ptp ppp traj0 lc region
-    
+    fclose(ip_line_fid);
+    fclose(traj_line_fid);
     end % end iline loop
     
     if (exist('ip_fid','var') && ip_fid>0)

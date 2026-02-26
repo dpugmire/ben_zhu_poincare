@@ -109,6 +109,13 @@ public:
                        int ny_local,
                        float x,
                        float y) const;
+    float interp2_spline(const std::vector<float>& xcoords,
+                         const std::vector<float>& ycoords,
+                         const std::vector<float>& data,
+                         int nx_local,
+                         int ny_local,
+                         float x,
+                         float y) const;
 
     // x-z interpolation for field arrays.
     float interp_xz_3d_y(const std::vector<float>& data3d,
@@ -118,10 +125,21 @@ public:
     float interp_xz_2d(const std::vector<float>& data2d,
                        float x,
                        float z) const;
+    float interp_xz_3d_y_spline(const std::vector<float>& data3d,
+                                int y0,
+                                float x,
+                                float z) const;
+    float interp_xz_2d_spline(const std::vector<float>& data2d,
+                              float x,
+                              float z) const;
     float interp_periodic_row_3d(const std::vector<float>& data3d,
                                  int ix,
                                  int iy,
                                  float z) const;
+    float interp_periodic_row_3d_spline(const std::vector<float>& data3d,
+                                        int ix,
+                                        int iy,
+                                        float z) const;
 
     // Evaluate dx/dy and dz/dy for RK4 stage.
     // stage = 0 (start), 1 (half), 2 (end)

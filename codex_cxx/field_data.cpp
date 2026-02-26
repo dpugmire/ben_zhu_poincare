@@ -14,6 +14,144 @@ namespace {
 const float kPi = 3.14159265358979323846f;
 const float kMu0 = 4.0f * kPi * 1.0e-7f;
 
+inline int clamp_int_local(int v, int lo, int hi) {
+    if (v < lo) return lo;
+    if (v > hi) return hi;
+    return v;
+}
+
+struct NaturalCubicSpline {
+    std::vector<float> x;
+    std::vector<float> y;
+    std::vector<float> b;
+    std::vector<float> c;
+    std::vector<float> d;
+    int n = 0;
+
+    void build(const std::vector<float>& xin, const std::vector<float>& yin) {
+        x = xin;
+        y = yin;
+        n = static_cast<int>(x.size());
+        b.assign(n, 0.0f);
+        c.assign(n, 0.0f);
+        d.assign(n, 0.0f);
+
+        if (n <= 2 || static_cast<int>(y.size()) != n) {
+            if (n == 2) {
+                float dx = x[1] - x[0];
+                if (std::fabs(dx) > 1.0e-20f) {
+                    b[0] = (y[1] - y[0]) / dx;
+                }
+            }
+            return;
+        }
+
+        const int nm1 = n - 1;
+        std::vector<float> h(nm1, 0.0f);
+        for (int i = 0; i < nm1; ++i) {
+            h[i] = x[i + 1] - x[i];
+        }
+
+        std::vector<float> alpha(n, 0.0f);
+        for (int i = 1; i < nm1; ++i) {
+            if (std::fabs(h[i]) < 1.0e-20f || std::fabs(h[i - 1]) < 1.0e-20f) continue;
+            alpha[i] = 3.0f / h[i] * (y[i + 1] - y[i]) -
+                       3.0f / h[i - 1] * (y[i] - y[i - 1]);
+        }
+
+        std::vector<float> l(n, 0.0f), mu(n, 0.0f), z(n, 0.0f);
+        l[0] = 1.0f;
+        for (int i = 1; i < nm1; ++i) {
+            l[i] = 2.0f * (x[i + 1] - x[i - 1]) - h[i - 1] * mu[i - 1];
+            if (std::fabs(l[i]) < 1.0e-20f) l[i] = 1.0e-20f;
+            mu[i] = h[i] / l[i];
+            z[i] = (alpha[i] - h[i - 1] * z[i - 1]) / l[i];
+        }
+        l[nm1] = 1.0f;
+        c[nm1] = 0.0f;
+
+        for (int j = nm1 - 1; j >= 0; --j) {
+            c[j] = z[j] - mu[j] * c[j + 1];
+            if (std::fabs(h[j]) < 1.0e-20f) {
+                b[j] = 0.0f;
+                d[j] = 0.0f;
+            } else {
+                b[j] = (y[j + 1] - y[j]) / h[j] - h[j] * (c[j + 1] + 2.0f * c[j]) / 3.0f;
+                d[j] = (c[j + 1] - c[j]) / (3.0f * h[j]);
+            }
+        }
+    }
+
+    float eval(float xv) const {
+        if (n <= 0) return 0.0f;
+        if (n == 1) return y[0];
+        if (xv <= x.front()) return y.front();
+        if (xv >= x.back()) return y.back();
+
+        int lo = 0;
+        int hi = n - 1;
+        while (hi - lo > 1) {
+            int mid = (lo + hi) / 2;
+            if (x[mid] <= xv) {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+        }
+        float dx = xv - x[lo];
+        return y[lo] + b[lo] * dx + c[lo] * dx * dx + d[lo] * dx * dx * dx;
+    }
+};
+
+float lagrange4(float x,
+                float x0, float x1, float x2, float x3,
+                float y0, float y1, float y2, float y3) {
+    const float xs[4] = {x0, x1, x2, x3};
+    const float ys[4] = {y0, y1, y2, y3};
+    float out = 0.0f;
+    for (int i = 0; i < 4; ++i) {
+        float li = 1.0f;
+        for (int j = 0; j < 4; ++j) {
+            if (i == j) continue;
+            float den = xs[i] - xs[j];
+            if (std::fabs(den) < 1.0e-20f) {
+                return ys[1];
+            }
+            li *= (x - xs[j]) / den;
+        }
+        out += ys[i] * li;
+    }
+    return out;
+}
+
+void cubic_stencil_centered(int base_idx, int n_nodes, int out_idx[4]) {
+    if (n_nodes < 4) {
+        out_idx[0] = 0;
+        out_idx[1] = clamp_int_local(base_idx, 0, std::max(0, n_nodes - 1));
+        out_idx[2] = out_idx[1];
+        out_idx[3] = out_idx[1];
+        return;
+    }
+    if (base_idx <= 1) {
+        out_idx[0] = 0;
+        out_idx[1] = 1;
+        out_idx[2] = 2;
+        out_idx[3] = 3;
+        return;
+    }
+    if (base_idx >= n_nodes - 3) {
+        out_idx[0] = n_nodes - 4;
+        out_idx[1] = n_nodes - 3;
+        out_idx[2] = n_nodes - 2;
+        out_idx[3] = n_nodes - 1;
+        return;
+    }
+    out_idx[0] = base_idx - 1;
+    out_idx[1] = base_idx;
+    out_idx[2] = base_idx + 1;
+    out_idx[3] = base_idx + 2;
+}
+
 void nc_check(int status, const std::string& where) {
     if (status != NC_NOERR) {
         throw std::runtime_error(where + ": " + nc_strerror(status));
@@ -273,6 +411,39 @@ float FieldData::interp2_rect(const std::vector<float>& xcoords,
     return v0 + ty * (v1 - v0);
 }
 
+float FieldData::interp2_spline(const std::vector<float>& xcoords,
+                                const std::vector<float>& ycoords,
+                                const std::vector<float>& data,
+                                int nx_local,
+                                int ny_local,
+                                float x,
+                                float y) const {
+    if (nx_local < 2 || ny_local < 2) {
+        return 0.0f;
+    }
+    if (static_cast<int>(xcoords.size()) != nx_local ||
+        static_cast<int>(ycoords.size()) != ny_local ||
+        static_cast<int>(data.size()) != nx_local * ny_local) {
+        return 0.0f;
+    }
+
+    std::vector<float> along_x(nx_local, 0.0f);
+    std::vector<float> row(ny_local, 0.0f);
+    NaturalCubicSpline spl;
+
+    for (int ix = 0; ix < nx_local; ++ix) {
+        const int base = ix * ny_local;
+        for (int iy = 0; iy < ny_local; ++iy) {
+            row[iy] = data[base + iy];
+        }
+        spl.build(ycoords, row);
+        along_x[ix] = spl.eval(y);
+    }
+
+    spl.build(xcoords, along_x);
+    return spl.eval(x);
+}
+
 float FieldData::interp_xz_3d_y(const std::vector<float>& data3d,
                                 int y0,
                                 float x,
@@ -322,6 +493,57 @@ float FieldData::interp_xz_3d_y(const std::vector<float>& data3d,
     return v0 + tx * (v1 - v0);
 }
 
+float FieldData::interp_xz_3d_y_spline(const std::vector<float>& data3d,
+                                       int y0,
+                                       float x,
+                                       float z) const {
+    if (nx < 4 || nzG < 4) {
+        return interp_xz_3d_y(data3d, y0, x, z);
+    }
+    if (nx < 2 || nzG < 1) {
+        return 0.0f;
+    }
+    y0 = clamp_int_local(y0, 0, ny - 1);
+    float xq = x;
+    if (xq <= xarray.front()) xq = xarray.front();
+    if (xq >= xarray.back()) xq = xarray.back();
+
+    int ix_base = lower_bracket(xarray, xq);
+    int ixs[4] = {0, 1, 2, 3};
+    cubic_stencil_centered(ix_base, nx, ixs);
+
+    float zq = wrap_z(z);
+    int iz_base = static_cast<int>(std::floor(zq / dz_torus));
+    iz_base = clamp_int_local(iz_base, 0, nzG - 1);
+    int izs[4] = {0, 1, 2, 3};
+    cubic_stencil_centered(iz_base, nzG + 1, izs);
+
+    auto sample = [&](int ix, int iz_ext) -> float {
+        if (iz_ext <= 0) return data3d[idx3(ix, y0, 0)];
+        if (iz_ext >= nzG) return data3d[idx3(ix, y0, nzG - 1)];
+        return data3d[idx3(ix, y0, iz_ext)];
+    };
+
+    float xvals[4] = {xarray[ixs[0]], xarray[ixs[1]], xarray[ixs[2]], xarray[ixs[3]]};
+    float zinterp[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+    for (int i = 0; i < 4; ++i) {
+        const int ix = ixs[i];
+        float zc0 = static_cast<float>(izs[0]) * dz_torus;
+        float zc1 = static_cast<float>(izs[1]) * dz_torus;
+        float zc2 = static_cast<float>(izs[2]) * dz_torus;
+        float zc3 = static_cast<float>(izs[3]) * dz_torus;
+        float zv0 = sample(ix, izs[0]);
+        float zv1 = sample(ix, izs[1]);
+        float zv2 = sample(ix, izs[2]);
+        float zv3 = sample(ix, izs[3]);
+        zinterp[i] = lagrange4(zq, zc0, zc1, zc2, zc3, zv0, zv1, zv2, zv3);
+    }
+
+    return lagrange4(xq,
+                     xvals[0], xvals[1], xvals[2], xvals[3],
+                     zinterp[0], zinterp[1], zinterp[2], zinterp[3]);
+}
+
 float FieldData::interp_xz_2d(const std::vector<float>& data2d,
                               float x,
                               float z) const {
@@ -368,6 +590,55 @@ float FieldData::interp_xz_2d(const std::vector<float>& data2d,
     return v0 + tx * (v1 - v0);
 }
 
+float FieldData::interp_xz_2d_spline(const std::vector<float>& data2d,
+                                     float x,
+                                     float z) const {
+    if (nx < 4 || nzG < 4) {
+        return interp_xz_2d(data2d, x, z);
+    }
+    if (nx < 2 || nzG < 1) {
+        return 0.0f;
+    }
+    float xq = x;
+    if (xq <= xarray.front()) xq = xarray.front();
+    if (xq >= xarray.back()) xq = xarray.back();
+
+    int ix_base = lower_bracket(xarray, xq);
+    int ixs[4] = {0, 1, 2, 3};
+    cubic_stencil_centered(ix_base, nx, ixs);
+
+    float zq = wrap_z(z);
+    int iz_base = static_cast<int>(std::floor(zq / dz_torus));
+    iz_base = clamp_int_local(iz_base, 0, nzG - 1);
+    int izs[4] = {0, 1, 2, 3};
+    cubic_stencil_centered(iz_base, nzG + 1, izs);
+
+    auto sample = [&](int ix, int iz_ext) -> float {
+        if (iz_ext <= 0) return data2d[idx_xz(ix, 0)];
+        if (iz_ext >= nzG) return data2d[idx_xz(ix, nzG - 1)];
+        return data2d[idx_xz(ix, iz_ext)];
+    };
+
+    float xvals[4] = {xarray[ixs[0]], xarray[ixs[1]], xarray[ixs[2]], xarray[ixs[3]]};
+    float zinterp[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+    for (int i = 0; i < 4; ++i) {
+        const int ix = ixs[i];
+        float zc0 = static_cast<float>(izs[0]) * dz_torus;
+        float zc1 = static_cast<float>(izs[1]) * dz_torus;
+        float zc2 = static_cast<float>(izs[2]) * dz_torus;
+        float zc3 = static_cast<float>(izs[3]) * dz_torus;
+        float zv0 = sample(ix, izs[0]);
+        float zv1 = sample(ix, izs[1]);
+        float zv2 = sample(ix, izs[2]);
+        float zv3 = sample(ix, izs[3]);
+        zinterp[i] = lagrange4(zq, zc0, zc1, zc2, zc3, zv0, zv1, zv2, zv3);
+    }
+
+    return lagrange4(xq,
+                     xvals[0], xvals[1], xvals[2], xvals[3],
+                     zinterp[0], zinterp[1], zinterp[2], zinterp[3]);
+}
+
 float FieldData::interp_periodic_row_3d(const std::vector<float>& data3d,
                                         int ix,
                                         int iy,
@@ -390,6 +661,39 @@ float FieldData::interp_periodic_row_3d(const std::vector<float>& data3d,
     float v0 = data3d[idx3(ix, iy, iz0)];
     float v1 = data3d[idx3(ix, iy, iz1)];
     return v0 + t * (v1 - v0);
+}
+
+float FieldData::interp_periodic_row_3d_spline(const std::vector<float>& data3d,
+                                               int ix,
+                                               int iy,
+                                               float z) const {
+    ix = clamp_int_local(ix, 0, nx - 1);
+    iy = clamp_int_local(iy, 0, ny - 1);
+    if (nzG < 4) {
+        return interp_periodic_row_3d(data3d, ix, iy, z);
+    }
+
+    float zq = wrap_z(z);
+    int iz_base = static_cast<int>(std::floor(zq / dz_torus));
+    iz_base = clamp_int_local(iz_base, 0, nzG - 1);
+    int izs[4] = {0, 1, 2, 3};
+    cubic_stencil_centered(iz_base, nzG + 1, izs);
+
+    auto sample = [&](int iz_ext) -> float {
+        if (iz_ext <= 0) return data3d[idx3(ix, iy, 0)];
+        if (iz_ext >= nzG) return data3d[idx3(ix, iy, 0)];
+        return data3d[idx3(ix, iy, iz_ext)];
+    };
+
+    float zc0 = static_cast<float>(izs[0]) * dz_torus;
+    float zc1 = static_cast<float>(izs[1]) * dz_torus;
+    float zc2 = static_cast<float>(izs[2]) * dz_torus;
+    float zc3 = static_cast<float>(izs[3]) * dz_torus;
+    float zv0 = sample(izs[0]);
+    float zv1 = sample(izs[1]);
+    float zv2 = sample(izs[2]);
+    float zv3 = sample(izs[3]);
+    return lagrange4(zq, zc0, zc1, zc2, zc3, zv0, zv1, zv2, zv3);
 }
 
 void FieldData::evaluate_stage(float x,
@@ -434,42 +738,42 @@ void FieldData::evaluate_stage(float x,
     }
 
     if (stage == 0) {
-        dxdy_val = interp_xz_3d_y(dxdy, yp, x, z);
-        dzdy_val = interp_xz_3d_y(dzdy, yp, x, z);
+        dxdy_val = interp_xz_3d_y_spline(dxdy, yp, x, z);
+        dzdy_val = interp_xz_3d_y_spline(dzdy, yp, x, z);
         return;
     }
 
     if (stage == 2) {
         if (use_twist) {
             if (use_plus) {
-                dxdy_val = interp_xz_2d(dxdy_p1, x, z);
-                dzdy_val = interp_xz_2d(dzdy_p1, x, z);
+                dxdy_val = interp_xz_2d_spline(dxdy_p1, x, z);
+                dzdy_val = interp_xz_2d_spline(dzdy_p1, x, z);
             } else {
-                dxdy_val = interp_xz_2d(dxdy_m1, x, z);
-                dzdy_val = interp_xz_2d(dzdy_m1, x, z);
+                dxdy_val = interp_xz_2d_spline(dxdy_m1, x, z);
+                dzdy_val = interp_xz_2d_spline(dzdy_m1, x, z);
             }
         } else {
-            dxdy_val = interp_xz_3d_y(dxdy, yn, x, z);
-            dzdy_val = interp_xz_3d_y(dzdy, yn, x, z);
+            dxdy_val = interp_xz_3d_y_spline(dxdy, yn, x, z);
+            dzdy_val = interp_xz_3d_y_spline(dzdy, yn, x, z);
         }
         return;
     }
 
-    float dx_p = interp_xz_3d_y(dxdy, yp, x, z);
-    float dz_p = interp_xz_3d_y(dzdy, yp, x, z);
+    float dx_p = interp_xz_3d_y_spline(dxdy, yp, x, z);
+    float dz_p = interp_xz_3d_y_spline(dzdy, yp, x, z);
     float dx_n = 0.0f;
     float dz_n = 0.0f;
     if (use_twist) {
         if (use_plus) {
-            dx_n = interp_xz_2d(dxdy_p1, x, z);
-            dz_n = interp_xz_2d(dzdy_p1, x, z);
+            dx_n = interp_xz_2d_spline(dxdy_p1, x, z);
+            dz_n = interp_xz_2d_spline(dzdy_p1, x, z);
         } else {
-            dx_n = interp_xz_2d(dxdy_m1, x, z);
-            dz_n = interp_xz_2d(dzdy_m1, x, z);
+            dx_n = interp_xz_2d_spline(dxdy_m1, x, z);
+            dz_n = interp_xz_2d_spline(dzdy_m1, x, z);
         }
     } else {
-        dx_n = interp_xz_3d_y(dxdy, yn, x, z);
-        dz_n = interp_xz_3d_y(dzdy, yn, x, z);
+        dx_n = interp_xz_3d_y_spline(dxdy, yn, x, z);
+        dz_n = interp_xz_3d_y_spline(dzdy, yn, x, z);
     }
     dxdy_val = 0.5f * (dx_p + dx_n);
     dzdy_val = 0.5f * (dz_p + dz_n);
@@ -511,9 +815,20 @@ void FieldData::load_var_3d_nz(int ncid, const char* name, int nz_file, std::vec
     nc_check(nc_get_var_double(ncid, varid, temp.data()),
              std::string("nc_get_var_double(") + name + ")");
 
+    // apar NetCDF files are generated from MATLAB/Octave arrays. Convert
+    // the incoming 3D payload from MATLAB linearization to C row-major.
     out.resize(temp.size());
-    for (size_t i = 0; i < temp.size(); ++i) {
-        out[i] = static_cast<float>(temp[i]);
+    const size_t nxy = static_cast<size_t>(nx) * static_cast<size_t>(ny);
+    for (size_t dst = 0; dst < temp.size(); ++dst) {
+        int ix = static_cast<int>(dst % static_cast<size_t>(nx));
+        size_t tmp = dst / static_cast<size_t>(nx);
+        int iy = static_cast<int>(tmp % static_cast<size_t>(ny));
+        int iz = static_cast<int>(dst / nxy);
+
+        size_t src = (static_cast<size_t>(ix) * static_cast<size_t>(ny) +
+                      static_cast<size_t>(iy)) * static_cast<size_t>(nz_file) +
+                     static_cast<size_t>(iz);
+        out[dst] = static_cast<float>(temp[src]);
     }
 }
 
@@ -816,12 +1131,12 @@ void FieldData::compute_twist_shift() {
             float z_base = zarray[iz];
 
             float zp = wrap_z(z_base + sa[ix]);
-            dxdy_p1[idx_xz(ix, iz)] = interp_periodic_row_3d(dxdy, ix, nypf1, zp);
-            dzdy_p1[idx_xz(ix, iz)] = interp_periodic_row_3d(dzdy, ix, nypf1, zp);
+            dxdy_p1[idx_xz(ix, iz)] = interp_periodic_row_3d_spline(dxdy, ix, nypf1, zp);
+            dzdy_p1[idx_xz(ix, iz)] = interp_periodic_row_3d_spline(dzdy, ix, nypf1, zp);
 
             float zm = wrap_z(z_base - sa[ix]);
-            dxdy_m1[idx_xz(ix, iz)] = interp_periodic_row_3d(dxdy, ix, nypf2 - 1, zm);
-            dzdy_m1[idx_xz(ix, iz)] = interp_periodic_row_3d(dzdy, ix, nypf2 - 1, zm);
+            dxdy_m1[idx_xz(ix, iz)] = interp_periodic_row_3d_spline(dxdy, ix, nypf2 - 1, zm);
+            dzdy_m1[idx_xz(ix, iz)] = interp_periodic_row_3d_spline(dzdy, ix, nypf2 - 1, zm);
         }
     }
 }
