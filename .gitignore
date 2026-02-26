@@ -1,0 +1,9 @@
+python_rewrite
+python_rewrite_claude
+convert_cpp
+convert
+claude
+codex
+mat_pp
+mat_traj
+*.o
