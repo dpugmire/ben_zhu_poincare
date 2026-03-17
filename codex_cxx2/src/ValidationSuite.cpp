@@ -36,6 +36,10 @@ bool lineIsSelected(const std::vector<int>& filter, int line) {
     return false;
 }
 
+bool compareValidationCase(const ValidationCase& a, const ValidationCase& b) {
+    return std::tie(a.divertorTag, a.line) < std::tie(b.divertorTag, b.line);
+}
+
 }  // namespace
 
 std::vector<ValidationCase> ValidationSuite::discoverCases(const ValidationConfig& config) {
@@ -103,9 +107,7 @@ std::vector<ValidationCase> ValidationSuite::discoverCases(const ValidationConfi
         out.push_back(testCase);
     }
 
-    std::sort(out.begin(), out.end(), [](const ValidationCase& a, const ValidationCase& b) {
-        return std::tie(a.divertorTag, a.line) < std::tie(b.divertorTag, b.line);
-    });
+    std::sort(out.begin(), out.end(), compareValidationCase);
 
     return out;
 }

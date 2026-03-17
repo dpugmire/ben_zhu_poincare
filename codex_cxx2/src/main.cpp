@@ -76,6 +76,36 @@ enum class LineSpecMode {
     range
 };
 
+void runDivertorTrace(const std::string& tag,
+                      const std::string& aparPath,
+                      const std::vector<double>& requestedLines,
+                      const ValidationConfig& config,
+                      bool useCombinedOutput,
+                      PoincareOutput& output,
+                      std::vector<LineTraceResult>& combinedLines) {
+    AparData data;
+    data.load(aparPath);
+
+    AparFieldModel model(data);
+    FieldLineIntegrator integrator(model);
+    PunctureDetector punctureDetector(model);
+
+    for (double line : requestedLines) {
+        LineTraceResult traced = integrator.traceLine(line, config.traceOptions);
+        punctureDetector.detect(traced, config.traceOptions.direction, config.traceOptions.npMax);
+        const size_t trajCount = traced.trajectoryXYZ.size();
+        const size_t punctureCount = traced.punctures.size();
+        if (useCombinedOutput) {
+            combinedLines.push_back(traced);
+        } else {
+            output.writeLineOutputs(traced, config.outputDir, tag);
+        }
+        std::cout << "Wrote " << tag << " line " << line
+                  << ": traj=" << trajCount
+                  << ", punctures=" << punctureCount << "\n";
+    }
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -236,35 +266,23 @@ int main(int argc, char** argv) {
         PoincareOutput output;
         std::vector<LineTraceResult> combinedLines;
 
-        auto runDivertor = [&](const std::string& tag, const std::string& aparPath) {
-            AparData data;
-            data.load(aparPath);
-
-            AparFieldModel model(data);
-            FieldLineIntegrator integrator(model);
-            PunctureDetector punctureDetector(model);
-
-            for (double line : requestedLines) {
-                LineTraceResult traced = integrator.traceLine(line, config.traceOptions);
-                punctureDetector.detect(traced, config.traceOptions.direction, config.traceOptions.npMax);
-                const size_t trajCount = traced.trajectoryXYZ.size();
-                const size_t punctureCount = traced.punctures.size();
-                if (useCombinedOutput) {
-                    combinedLines.push_back(traced);
-                } else {
-                    output.writeLineOutputs(traced, config.outputDir, tag);
-                }
-                std::cout << "Wrote " << tag << " line " << line
-                          << ": traj=" << trajCount
-                          << ", punctures=" << punctureCount << "\n";
-            }
-        };
-
         if (doSingle) {
-            runDivertor("single", config.aparSinglePath);
+            runDivertorTrace("single",
+                             config.aparSinglePath,
+                             requestedLines,
+                             config,
+                             useCombinedOutput,
+                             output,
+                             combinedLines);
         }
         if (doCirc) {
-            runDivertor("circ", config.aparCircPath);
+            runDivertorTrace("circ",
+                             config.aparCircPath,
+                             requestedLines,
+                             config,
+                             useCombinedOutput,
+                             output,
+                             combinedLines);
         }
 
         if (useCombinedOutput) {

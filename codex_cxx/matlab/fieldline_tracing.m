@@ -870,6 +870,9 @@ yiarray = (1:ny);
     if (exist('ip_fid','var') && ip_fid>0)
         fclose(ip_fid);
     end
+    if (exist('ip_tp_fid','var') && ip_tp_fid>0)
+        fclose(ip_tp_fid);
+    end
     if (exist('traj_fid','var') && traj_fid>0)
         fclose(traj_fid);
     end

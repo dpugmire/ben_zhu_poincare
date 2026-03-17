@@ -8,3 +8,6 @@ codex
 mat_pp
 mat_traj
 *.o
+codex_cxx
+codex_python
+claude_cxx

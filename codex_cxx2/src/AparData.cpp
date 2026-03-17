@@ -81,6 +81,24 @@ std::vector<std::string> getVarDimNames(int ncid, const std::string& name) {
     return out;
 }
 
+void setIxIyIzValue(std::vector<double>& out,
+                    int ny,
+                    int nzG,
+                    int ix,
+                    int iy,
+                    int iz,
+                    double value) {
+    out[(static_cast<size_t>(ix) * ny + iy) * nzG + iz] = value;
+}
+
+void setIxIzValue(std::vector<double>& out,
+                  int nzG,
+                  int ix,
+                  int iz,
+                  double value) {
+    out[static_cast<size_t>(ix) * nzG + iz] = value;
+}
+
 std::vector<double> convert2DToIxIy(int ncid,
                                     const std::string& varName,
                                     int nx,
@@ -178,17 +196,13 @@ std::vector<double> convert3DToIxIyIzReplicated(int ncid,
     const int nzG = nz * zperiod;
     std::vector<double> out(static_cast<size_t>(nx) * ny * nzG, 0.0);
 
-    auto setOut = [&out, ny, nzG](int ix, int iy, int iz, double value) {
-        out[(static_cast<size_t>(ix) * ny + iy) * nzG + iz] = value;
-    };
-
     if (dims[0] == "nz" && dims[1] == "ny" && dims[2] == "nx") {
         for (int iz = 0; iz < nz; ++iz) {
             for (int iy = 0; iy < ny; ++iy) {
                 for (int ix = 0; ix < nx; ++ix) {
                     const double value = raw[(static_cast<size_t>(iz) * ny + iy) * nx + ix];
                     for (int zp = 0; zp < zperiod; ++zp) {
-                        setOut(ix, iy, zp * nz + iz, value);
+                        setIxIyIzValue(out, ny, nzG, ix, iy, zp * nz + iz, value);
                     }
                 }
             }
@@ -202,7 +216,7 @@ std::vector<double> convert3DToIxIyIzReplicated(int ncid,
                 for (int iz = 0; iz < nz; ++iz) {
                     const double value = raw[(static_cast<size_t>(ix) * ny + iy) * nz + iz];
                     for (int zp = 0; zp < zperiod; ++zp) {
-                        setOut(ix, iy, zp * nz + iz, value);
+                        setIxIyIzValue(out, ny, nzG, ix, iy, zp * nz + iz, value);
                     }
                 }
             }
@@ -215,7 +229,7 @@ std::vector<double> convert3DToIxIyIzReplicated(int ncid,
             for (int ix = 0; ix < nx; ++ix) {
                 const double value = raw[(static_cast<size_t>(iz) * ny + iy) * nx + ix];
                 for (int zp = 0; zp < zperiod; ++zp) {
-                    setOut(ix, iy, zp * nz + iz, value);
+                    setIxIyIzValue(out, ny, nzG, ix, iy, zp * nz + iz, value);
                 }
             }
         }
@@ -239,16 +253,12 @@ std::vector<double> convert2DXZReplicated(int ncid,
     const int nzG = nz * zperiod;
     std::vector<double> out(static_cast<size_t>(nx) * nzG, 0.0);
 
-    auto setOut = [&out, nzG](int ix, int iz, double value) {
-        out[static_cast<size_t>(ix) * nzG + iz] = value;
-    };
-
     if (dims[0] == "nz" && dims[1] == "nx") {
         for (int iz = 0; iz < nz; ++iz) {
             for (int ix = 0; ix < nx; ++ix) {
                 const double value = raw[static_cast<size_t>(iz) * nx + ix];
                 for (int zp = 0; zp < zperiod; ++zp) {
-                    setOut(ix, zp * nz + iz, value);
+                    setIxIzValue(out, nzG, ix, zp * nz + iz, value);
                 }
             }
         }
@@ -260,7 +270,7 @@ std::vector<double> convert2DXZReplicated(int ncid,
             for (int iz = 0; iz < nz; ++iz) {
                 const double value = raw[static_cast<size_t>(ix) * nz + iz];
                 for (int zp = 0; zp < zperiod; ++zp) {
-                    setOut(ix, zp * nz + iz, value);
+                    setIxIzValue(out, nzG, ix, zp * nz + iz, value);
                 }
             }
         }
@@ -271,7 +281,7 @@ std::vector<double> convert2DXZReplicated(int ncid,
         for (int ix = 0; ix < nx; ++ix) {
             const double value = raw[static_cast<size_t>(iz) * nx + ix];
             for (int zp = 0; zp < zperiod; ++zp) {
-                setOut(ix, zp * nz + iz, value);
+                setIxIzValue(out, nzG, ix, zp * nz + iz, value);
             }
         }
     }

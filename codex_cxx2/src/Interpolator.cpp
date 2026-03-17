@@ -26,6 +26,15 @@ void addRootIfValid(std::vector<double>& roots, double r) {
     roots.push_back(r);
 }
 
+double value3D(const std::vector<double>& data,
+               int ny,
+               int nz,
+               int ix,
+               int iy,
+               int iz) {
+    return data[(ix * ny + iy) * nz + iz];
+}
+
 }  // namespace
 
 void NaturalCubicSpline::build(const std::vector<double>& x, const std::vector<double>& y) {
@@ -357,18 +366,14 @@ double Interpolator::trilinear(const std::vector<double>& xcoords,
     ty = std::max(0.0, std::min(1.0, ty));
     tz = std::max(0.0, std::min(1.0, tz));
 
-    const auto at = [ny, nz, &data](int ix, int iy, int iz) {
-        return data[(ix * ny + iy) * nz + iz];
-    };
-
-    const double c000 = at(ix0, iy0, iz0);
-    const double c001 = at(ix0, iy0, iz1);
-    const double c010 = at(ix0, iy1, iz0);
-    const double c011 = at(ix0, iy1, iz1);
-    const double c100 = at(ix1, iy0, iz0);
-    const double c101 = at(ix1, iy0, iz1);
-    const double c110 = at(ix1, iy1, iz0);
-    const double c111 = at(ix1, iy1, iz1);
+    const double c000 = value3D(data, ny, nz, ix0, iy0, iz0);
+    const double c001 = value3D(data, ny, nz, ix0, iy0, iz1);
+    const double c010 = value3D(data, ny, nz, ix0, iy1, iz0);
+    const double c011 = value3D(data, ny, nz, ix0, iy1, iz1);
+    const double c100 = value3D(data, ny, nz, ix1, iy0, iz0);
+    const double c101 = value3D(data, ny, nz, ix1, iy0, iz1);
+    const double c110 = value3D(data, ny, nz, ix1, iy1, iz0);
+    const double c111 = value3D(data, ny, nz, ix1, iy1, iz1);
 
     const double c00 = c000 + tx * (c100 - c000);
     const double c01 = c001 + tx * (c101 - c001);

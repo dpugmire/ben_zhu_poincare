@@ -30,7 +30,7 @@ end
 % Mesh resolution info
 %nx = 260; ny = 128; nz = 256; zperiod = 1;
 
-divertorCase = 0;
+divertorCase = 1;
 dumpApar = 0;
 
 if divertorCase == 0
@@ -445,16 +445,20 @@ yiarray = (1:ny);
     cm = jet(nlines);
     ip_fid = fopen(['ip_matlab.',config_tab,'.txt'],'w');
     fprintf(ip_fid,'iline it ipx ipy ipz\n');
+    ip_tp_fid = fopen(['ip_matlab.',config_tab,'.TP.txt'],'w');
+    fprintf(ip_tp_fid,'iline it theta psi\n');
     traj_fid = fopen(['traj_matlab.',config_tab,'.txt'],'w');
     fprintf(traj_fid,'iline it x y z\n');
 
     %parfor iline = 1:nlines
     LINES = 1:nlines;
-    LINES = [50, 100, 150];
-    LINES = [101, 201, 301, 401, 501];
+    LINES = [50, 75, 100, 125, 150];
+    #LINES = [101, 201, 301, 401, 501];
     for iline = LINES
         ip_line_fid = fopen(['ip_matlab.',config_tab,'.', int2str(iline),'.txt'],'w');
         fprintf(ip_line_fid,'iline it ipx ipy ipz\n');
+        ip_tp_line_fid = fopen(['ip_matlab.',config_tab,'.', int2str(iline),'.TP.txt'],'w');
+        fprintf(ip_tp_line_fid,'iline it theta psi\n');
         traj_line_fid = fopen(['traj_matlab.',config_tab,'.', int2str(iline),'.txt'],'w');
         fprintf(traj_line_fid,'iline it x y z\n');
         % pick starting points
@@ -818,6 +822,8 @@ yiarray = (1:ny);
 
                 ptheta(ip)=interp1(yiarray_cfr,theta_cfr,yind_tmp);
                 ppsi(ip)=interp1(xiarray,xarray,xind_tmp);
+                fprintf(ip_tp_fid,'%d %d %.16g %.16g\n',iline,it,ptheta(ip),ppsi(ip));
+                fprintf(ip_tp_line_fid,'%d %d %.16g %.16g\n',iline,it,ptheta(ip),ppsi(ip));
             %end
         end
         
@@ -883,11 +889,15 @@ yiarray = (1:ny);
     
     %clear traj fl_x3d fl_y3d fl_z3d fit ffl_x3d iit px py pz ptheta ppsi pxp pyp pzp ptp ppp traj0 lc region
     fclose(ip_line_fid);
+    fclose(ip_tp_line_fid);
     fclose(traj_line_fid);
     end % end iline loop
     
     if (exist('ip_fid','var') && ip_fid>0)
         fclose(ip_fid);
+    end
+    if (exist('ip_tp_fid','var') && ip_tp_fid>0)
+        fclose(ip_tp_fid);
     end
     if (exist('traj_fid','var') && traj_fid>0)
         fclose(traj_fid);
