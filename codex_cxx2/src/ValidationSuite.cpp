@@ -15,7 +15,6 @@
 #include "FieldLineIntegrator.h"
 #include "MatlabComparator.h"
 #include "PoincareOutput.h"
-#include "PunctureDetector.h"
 
 namespace {
 
@@ -136,13 +135,11 @@ std::vector<ValidationResult> ValidationSuite::run(const ValidationConfig& confi
 
         AparFieldModel model(*slot);
         FieldLineIntegrator integrator(model);
-        PunctureDetector punctureDetector(model);
 
         std::cout << "Running case: divertor=" << testCase.divertorTag
                   << ", line=" << testCase.line << std::endl;
 
         LineTraceResult lineResult = integrator.traceLine(testCase.line, config.traceOptions);
-        punctureDetector.detect(lineResult, config.traceOptions.direction, config.traceOptions.npMax);
 
         output.writeLineOutputs(lineResult, config.outputDir, testCase.divertorTag);
 

@@ -33,7 +33,7 @@ void writeLineToStreams(const LineTraceResult& line,
         ipOut << lineToken << " " << p.step << " "
               << p.xyz.x << " " << p.xyz.y << " " << p.xyz.z << "\n";
         tpOut << lineToken << " " << p.step << " "
-              << p.thetaPsi.x << " " << p.thetaPsi.y << "\n";
+              << 0.0 << " " << p.thetaPsi.x << " " << p.thetaPsi.y << "\n";
     }
 }
 
@@ -57,7 +57,7 @@ void PoincareOutput::writeLineOutputs(const LineTraceResult& line,
     }
 
     ipOut << "iline it ipx ipy ipz\n";
-    tpOut << "iline it theta psi\n";
+    tpOut << "iline it dummy theta psi\n";
     trajOut << "iline it x y z\n";
 
     ipOut << std::setprecision(16);
@@ -83,7 +83,7 @@ void PoincareOutput::writeCombinedOutputs(const std::vector<LineTraceResult>& li
     }
 
     ipOut << "iline it ipx ipy ipz\n";
-    tpOut << "iline it theta psi\n";
+    tpOut << "iline it dummy theta psi\n";
     trajOut << "iline it x y z\n";
 
     ipOut << std::setprecision(16);

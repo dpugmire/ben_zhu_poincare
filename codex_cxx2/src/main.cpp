@@ -10,7 +10,6 @@
 #include "AparFieldModel.h"
 #include "FieldLineIntegrator.h"
 #include "PoincareOutput.h"
-#include "PunctureDetector.h"
 #include "ValidationSuite.h"
 
 namespace {
@@ -88,11 +87,9 @@ void runDivertorTrace(const std::string& tag,
 
     AparFieldModel model(data);
     FieldLineIntegrator integrator(model);
-    PunctureDetector punctureDetector(model);
 
     for (double line : requestedLines) {
         LineTraceResult traced = integrator.traceLine(line, config.traceOptions);
-        punctureDetector.detect(traced, config.traceOptions.direction, config.traceOptions.npMax);
         const size_t trajCount = traced.trajectoryXYZ.size();
         const size_t punctureCount = traced.punctures.size();
         if (useCombinedOutput) {
