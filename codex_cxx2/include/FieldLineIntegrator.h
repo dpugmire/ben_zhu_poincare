@@ -4,22 +4,17 @@
 #include "AparFieldModel.h"
 #include "Types.h"
 
-class FieldLineIntegrator {
+class FieldLineIntegrator
+{
 public:
-    explicit FieldLineIntegrator(const AparFieldModel& model);
+  explicit FieldLineIntegrator(const AparFieldModel& model);
 
-    LineTraceResult traceLine(double iline, const TraceOptions& options) const;
+  LineTraceResult traceLine(double iline, const TraceOptions& options) const;
 
 private:
-    const AparFieldModel& model_;
+  const AparFieldModel& model_;
 
-    void rk4Step(double xStart,
-                 int yStart,
-                 double zStart,
-                 int region,
-                 int direction,
-                 double& xEnd,
-                 double& zEnd) const;
+  void rk4Step(double xStart, int yStart, double zStart, int region, int direction, double& xEnd, double& yEnd, double& zEnd) const;
 };
 
 #endif

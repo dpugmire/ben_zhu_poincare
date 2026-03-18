@@ -217,7 +217,7 @@ FieldLineIntegrator::FieldLineIntegrator(const AparFieldModel& model)
 {
 }
 
-void FieldLineIntegrator::rk4Step(double xStart, int yStart, double zStart, int region, int direction, double& xEnd, double& zEnd) const
+void FieldLineIntegrator::rk4Step(double xStart, int yStart, double zStart, int region, int direction, double& xEnd, double& yEnd, double& zEnd) const
 {
   constexpr double h = 1.0;
   const double hh = 0.5 * h;
@@ -248,6 +248,7 @@ void FieldLineIntegrator::rk4Step(double xStart, int yStart, double zStart, int 
 
   xEnd = xStart + direction * h6 * (dxdy1 + 2.0 * dxdy2 + 2.0 * dxdy3 + dxdy4);
   zEnd = zStart + direction * h6 * (dzdy1 + 2.0 * dzdy2 + 2.0 * dzdy3 + dzdy4);
+  yEnd = (direction == 1) ? (yStart + h) : (yStart - h);
 }
 
 LineTraceResult FieldLineIntegrator::traceLine(double iline, const TraceOptions& options) const
@@ -310,14 +311,12 @@ LineTraceResult FieldLineIntegrator::traceLine(double iline, const TraceOptions&
 
       double xEnd = xStart;
       double zEnd = zStart;
-      int yEnd = yStart;
+      double yEnd = static_cast<double>(yStart);
 
       if (region == 0 && yStart > d.nypf1 && yStart < d.nypf2 + 1)
       {
-        rk4Step(xStart, yStart, zStart, region, options.direction, xEnd, zEnd);
+        rk4Step(xStart, yStart, zStart, region, options.direction, xEnd, yEnd, zEnd);
         const double rawZEnd = zEnd;
-
-        yEnd = (options.direction == 1) ? (yStart + 1) : (yStart - 1);
 
         if (xEnd > d.xMax)
         {
@@ -370,10 +369,8 @@ LineTraceResult FieldLineIntegrator::traceLine(double iline, const TraceOptions&
       }
       else if (region == 1 || region == 2)
       {
-        rk4Step(xStart, yStart, zStart, region, options.direction, xEnd, zEnd);
+        rk4Step(xStart, yStart, zStart, region, options.direction, xEnd, yEnd, zEnd);
         const double rawZEnd = zEnd;
-
-        yEnd = (options.direction == 1) ? (yStart + 1) : (yStart - 1);
 
         if (options.direction == 1 && yStart == d.nypf1 && region == 2)
         {
