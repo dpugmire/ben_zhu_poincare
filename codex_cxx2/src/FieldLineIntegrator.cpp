@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 namespace
 {
@@ -249,29 +250,51 @@ void FieldLineIntegrator::rk4Step(const XZPoint& start,
   end.z = start.z + direction * h6 * (k1.dzdy + 2.0 * k2.dzdy + 2.0 * k3.dzdy + k4.dzdy);
 }
 
-LineTraceResult FieldLineIntegrator::traceLine(double iline, const TraceOptions& options) const
+LineTraceResult FieldLineIntegrator::traceLine(const Point3D& seedInd, const TraceOptions& options) const
 {
   const AparData& d = model_.data();
 
   LineTraceResult out;
-  out.iline = iline;
+  out.iline = seedInd.x;
 
-  if (iline < 1.0 || iline > static_cast<double>(d.nx))
+  const double xindSeed = seedInd.x;
+  if (xindSeed < 1.0 || xindSeed > static_cast<double>(d.nx))
   {
     out.endRegion = 99;
     return out;
   }
 
-  const int nsteps = options.nturns * d.ny;
-  out.states.reserve(static_cast<size_t>(std::max(0, nsteps)));
-  out.trajectoryXYZ.reserve(static_cast<size_t>(std::max(0, nsteps)));
+  constexpr int kDefaultMaxStepsPerPuncture = 200;
+  const long long derivedMaxStepsLL = static_cast<long long>(kDefaultMaxStepsPerPuncture) *
+                                      static_cast<long long>(std::max(1, options.npMax));
+  const int derivedMaxSteps = (derivedMaxStepsLL > static_cast<long long>(std::numeric_limits<int>::max()))
+      ? std::numeric_limits<int>::max()
+      : static_cast<int>(std::max(1LL, derivedMaxStepsLL));
+
+  const int maxStepsCap = (options.maxSteps > 0) ? options.maxSteps : derivedMaxSteps;
+  const int nsteps = std::max(1, maxStepsCap);
+  const int maxStateCount = (nsteps >= std::numeric_limits<int>::max())
+      ? std::numeric_limits<int>::max()
+      : (nsteps + 1);
+
+  out.states.reserve(static_cast<size_t>(std::max(0, maxStateCount)));
+  out.trajectoryXYZ.reserve(static_cast<size_t>(std::max(0, maxStateCount)));
   out.punctures.reserve(static_cast<size_t>(std::max(0, options.npMax)));
 
-  double xind = iline;
+  double xind = xindSeed;
   XZPoint current;
   current.x = model_.interp1(d.xiarray, d.xarray, xind);
-  int yStart = d.jyomp + 1;
-  current.z = d.zarray.empty() ? 0.0 : d.zarray.front();
+  int yStart = static_cast<int>(std::llround(seedInd.y));
+  if (yStart < 1)
+  {
+    yStart = 1;
+  }
+  else if (yStart > d.ny)
+  {
+    yStart = d.ny;
+  }
+  const double zind0 = seedInd.z;
+  current.z = model_.interp1(d.ziarray, d.zarray, zind0);
 
   int region = 1;
   if (xind < static_cast<double>(d.ixsep) + 0.5)
@@ -283,7 +306,6 @@ LineTraceResult FieldLineIntegrator::traceLine(double iline, const TraceOptions&
     }
   }
 
-  const double zind0 = model_.interp1(d.zarray, d.ziarray, current.z);
 
   TrajectoryState initial;
   initial.turn = 1;
@@ -299,11 +321,11 @@ LineTraceResult FieldLineIntegrator::traceLine(double iline, const TraceOptions&
   double lastFitRoot = -1.0e30;
 
   int iturn = 1;
-  while (region < 10 && iturn < options.nturns && static_cast<int>(out.states.size()) < nsteps)
+  while (region < 10 && static_cast<int>(out.states.size()) < maxStateCount)
   {
     for (int iy = 0; iy < d.ny - 1; ++iy)
     {
-      if (region >= 10 || static_cast<int>(out.states.size()) >= nsteps)
+      if (region >= 10 || static_cast<int>(out.states.size()) >= maxStateCount)
       {
         break;
       }

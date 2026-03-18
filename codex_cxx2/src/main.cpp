@@ -25,9 +25,9 @@ void printUsage(const char* prog) {
         << "  --divertor TAG        all|single|circ (default: all)\n"
         << "  --lines LIST          comma-separated x-index values (double supported)\n"
         << "  --nlines X0 X1 N      generate N evenly-spaced lines from X0 to X1 (double supported; writes ip_cxx.txt/traj_cxx.txt)\n"
-        << "  --nturns N            number of turns (default: 100)\n"
         << "  --direction DIR       +1 or -1 (default: 1)\n"
-        << "  --np-max N            max punctures per line (default: 1250)\n"
+        << "  --np-max N            max punctures per line (default: 100)\n"
+        << "  --max-steps N         max integration steps per line (default: 200 * np-max)\n"
         << "  --tol VALUE           max-abs tolerance (default: 1e-8)\n"
         << "  --compare             enable MATLAB comparison mode (default is trace-only)\n"
         << "  --help                show this help\n";
@@ -89,7 +89,11 @@ void runDivertorTrace(const std::string& tag,
     FieldLineIntegrator integrator(model);
 
     for (double line : requestedLines) {
-        LineTraceResult traced = integrator.traceLine(line, config.traceOptions);
+        Point3D seedInd;
+        seedInd.x = line;
+        seedInd.y = static_cast<double>(data.jyomp + 1);
+        seedInd.z = data.ziarray.empty() ? 1.0 : data.ziarray.front();
+        LineTraceResult traced = integrator.traceLine(seedInd, config.traceOptions);
         const size_t trajCount = traced.trajectoryXYZ.size();
         const size_t punctureCount = traced.punctures.size();
         if (useCombinedOutput) {
@@ -112,8 +116,7 @@ int main(int argc, char** argv) {
     config.aparSinglePath = "/Users/dpn/proj/bout++/ben_zhu_poincare/apar.single.nc";
     config.aparCircPath = "/Users/dpn/proj/bout++/ben_zhu_poincare/apar.circ.nc";
     config.traceOptions.direction = 1;
-    config.traceOptions.nturns = 100;
-    config.traceOptions.npMax = 1250;
+    config.traceOptions.npMax = 100;
     config.tolerance = 1.0e-8;
 
     bool doCompare = false;
@@ -171,16 +174,16 @@ int main(int argc, char** argv) {
             requestedLines = buildLineRange(x0, x1, n);
             continue;
         }
-        if (arg == "--nturns" && i + 1 < argc) {
-            config.traceOptions.nturns = std::atoi(argv[++i]);
-            continue;
-        }
         if (arg == "--direction" && i + 1 < argc) {
             config.traceOptions.direction = std::atoi(argv[++i]);
             continue;
         }
         if (arg == "--np-max" && i + 1 < argc) {
             config.traceOptions.npMax = std::atoi(argv[++i]);
+            continue;
+        }
+        if (arg == "--max-steps" && i + 1 < argc) {
+            config.traceOptions.maxSteps = std::atoi(argv[++i]);
             continue;
         }
         if (arg == "--tol" && i + 1 < argc) {
@@ -202,13 +205,13 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    if (config.traceOptions.nturns <= 0) {
-        std::cerr << "Error: --nturns must be positive\n";
+    if (config.traceOptions.npMax <= 0) {
+        std::cerr << "Error: --np-max must be positive\n";
         return 1;
     }
 
-    if (config.traceOptions.npMax <= 0) {
-        std::cerr << "Error: --np-max must be positive\n";
+    if (config.traceOptions.maxSteps < 0) {
+        std::cerr << "Error: --max-steps must be non-negative\n";
         return 1;
     }
 

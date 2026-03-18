@@ -9,7 +9,7 @@ class FieldLineIntegrator
 public:
   explicit FieldLineIntegrator(const AparFieldModel& model);
 
-  LineTraceResult traceLine(double iline, const TraceOptions& options) const;
+  LineTraceResult traceLine(const Point3D& seedInd, const TraceOptions& options) const;
 
 private:
   const AparFieldModel& model_;

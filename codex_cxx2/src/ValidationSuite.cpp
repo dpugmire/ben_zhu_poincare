@@ -139,7 +139,11 @@ std::vector<ValidationResult> ValidationSuite::run(const ValidationConfig& confi
         std::cout << "Running case: divertor=" << testCase.divertorTag
                   << ", line=" << testCase.line << std::endl;
 
-        LineTraceResult lineResult = integrator.traceLine(testCase.line, config.traceOptions);
+        Point3D seedInd;
+        seedInd.x = static_cast<double>(testCase.line);
+        seedInd.y = static_cast<double>(slot->jyomp + 1);
+        seedInd.z = slot->ziarray.empty() ? 1.0 : slot->ziarray.front();
+        LineTraceResult lineResult = integrator.traceLine(seedInd, config.traceOptions);
 
         output.writeLineOutputs(lineResult, config.outputDir, testCase.divertorTag);
 

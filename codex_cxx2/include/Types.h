@@ -50,8 +50,8 @@ struct LineTraceResult {
 
 struct TraceOptions {
     int direction = 1;
-    int nturns = 100;
-    int npMax = 1250;
+    int npMax = 100;
+    int maxSteps = 0;   // <=0 => auto cap: kDefaultMaxStepsPerPuncture * npMax
 };
 
 struct ValidationCase {
