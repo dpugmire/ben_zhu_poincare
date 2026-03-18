@@ -1,9 +1,11 @@
+#include <algorithm>
 #include <cmath>
 #include <cstdlib>
 #include <iostream>
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <limits>
 #include <vector>
 
 #include "AparData.h"
@@ -65,6 +67,21 @@ std::vector<double> buildLineRange(double x0, double x1, int n) {
     return out;
 }
 
+int computeMaxStateCount(const TraceOptions& options) {
+    constexpr int kDefaultMaxStepsPerPuncture = 200;
+    const long long derivedMaxStepsLL = static_cast<long long>(kDefaultMaxStepsPerPuncture) *
+                                        static_cast<long long>(std::max(1, options.npMax));
+    const int derivedMaxSteps = (derivedMaxStepsLL > static_cast<long long>(std::numeric_limits<int>::max()))
+        ? std::numeric_limits<int>::max()
+        : static_cast<int>(std::max(1LL, derivedMaxStepsLL));
+
+    const int maxStepsCap = (options.maxSteps > 0) ? options.maxSteps : derivedMaxSteps;
+    const int clampedSteps = std::max(1, maxStepsCap);
+    return (clampedSteps >= std::numeric_limits<int>::max())
+        ? std::numeric_limits<int>::max()
+        : (clampedSteps + 1);
+}
+
 bool isIntegerVal(double v) {
     return std::isfinite(v) && std::fabs(v - std::round(v)) < 1.0e-12;
 }
@@ -93,7 +110,12 @@ void runDivertorTrace(const std::string& tag,
         seedInd.x = line;
         seedInd.y = static_cast<double>(data.jyomp + 1);
         seedInd.z = data.ziarray.empty() ? 1.0 : data.ziarray.front();
-        LineTraceResult traced = integrator.traceLine(seedInd, config.traceOptions);
+        LineTraceResult traced;
+        const int maxStateCount = computeMaxStateCount(config.traceOptions);
+        traced.states.reserve(static_cast<size_t>(std::max(0, maxStateCount)));
+        traced.trajectoryXYZ.reserve(static_cast<size_t>(std::max(0, maxStateCount)));
+        traced.punctures.reserve(static_cast<size_t>(std::max(0, config.traceOptions.npMax)));
+        integrator.traceLine(seedInd, config.traceOptions, traced);
         const size_t trajCount = traced.trajectoryXYZ.size();
         const size_t punctureCount = traced.punctures.size();
         if (useCombinedOutput) {

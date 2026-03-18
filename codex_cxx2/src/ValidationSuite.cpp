@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <filesystem>
 #include <iostream>
+#include <limits>
 #include <map>
 #include <memory>
 #include <regex>
@@ -33,6 +34,21 @@ bool lineIsSelected(const std::vector<int>& filter, int line) {
         }
     }
     return false;
+}
+
+int computeMaxStateCount(const TraceOptions& options) {
+    constexpr int kDefaultMaxStepsPerPuncture = 200;
+    const long long derivedMaxStepsLL = static_cast<long long>(kDefaultMaxStepsPerPuncture) *
+                                        static_cast<long long>(std::max(1, options.npMax));
+    const int derivedMaxSteps = (derivedMaxStepsLL > static_cast<long long>(std::numeric_limits<int>::max()))
+        ? std::numeric_limits<int>::max()
+        : static_cast<int>(std::max(1LL, derivedMaxStepsLL));
+
+    const int maxStepsCap = (options.maxSteps > 0) ? options.maxSteps : derivedMaxSteps;
+    const int clampedSteps = std::max(1, maxStepsCap);
+    return (clampedSteps >= std::numeric_limits<int>::max())
+        ? std::numeric_limits<int>::max()
+        : (clampedSteps + 1);
 }
 
 bool compareValidationCase(const ValidationCase& a, const ValidationCase& b) {
@@ -143,7 +159,12 @@ std::vector<ValidationResult> ValidationSuite::run(const ValidationConfig& confi
         seedInd.x = static_cast<double>(testCase.line);
         seedInd.y = static_cast<double>(slot->jyomp + 1);
         seedInd.z = slot->ziarray.empty() ? 1.0 : slot->ziarray.front();
-        LineTraceResult lineResult = integrator.traceLine(seedInd, config.traceOptions);
+        LineTraceResult lineResult;
+        const int maxStateCount = computeMaxStateCount(config.traceOptions);
+        lineResult.states.reserve(static_cast<size_t>(std::max(0, maxStateCount)));
+        lineResult.trajectoryXYZ.reserve(static_cast<size_t>(std::max(0, maxStateCount)));
+        lineResult.punctures.reserve(static_cast<size_t>(std::max(0, config.traceOptions.npMax)));
+        integrator.traceLine(seedInd, config.traceOptions, lineResult);
 
         output.writeLineOutputs(lineResult, config.outputDir, testCase.divertorTag);
 

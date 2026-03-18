@@ -250,18 +250,22 @@ void FieldLineIntegrator::rk4Step(const XZPoint& start,
   end.z = start.z + direction * h6 * (k1.dzdy + 2.0 * k2.dzdy + 2.0 * k3.dzdy + k4.dzdy);
 }
 
-LineTraceResult FieldLineIntegrator::traceLine(const Point3D& seedInd, const TraceOptions& options) const
+void FieldLineIntegrator::traceLine(const Point3D& seedInd, const TraceOptions& options, LineTraceResult& out) const
 {
   const AparData& d = model_.data();
 
-  LineTraceResult out;
   out.iline = seedInd.x;
+  out.endRegion = 0;
+  out.connectionLength = 0.0;
+  out.states.clear();
+  out.trajectoryXYZ.clear();
+  out.punctures.clear();
 
   const double xindSeed = seedInd.x;
   if (xindSeed < 1.0 || xindSeed > static_cast<double>(d.nx))
   {
     out.endRegion = 99;
-    return out;
+    return;
   }
 
   constexpr int kDefaultMaxStepsPerPuncture = 200;
@@ -276,10 +280,6 @@ LineTraceResult FieldLineIntegrator::traceLine(const Point3D& seedInd, const Tra
   const int maxStateCount = (nsteps >= std::numeric_limits<int>::max())
       ? std::numeric_limits<int>::max()
       : (nsteps + 1);
-
-  out.states.reserve(static_cast<size_t>(std::max(0, maxStateCount)));
-  out.trajectoryXYZ.reserve(static_cast<size_t>(std::max(0, maxStateCount)));
-  out.punctures.reserve(static_cast<size_t>(std::max(0, options.npMax)));
 
   double xind = xindSeed;
   XZPoint current;
@@ -474,5 +474,5 @@ LineTraceResult FieldLineIntegrator::traceLine(const Point3D& seedInd, const Tra
   }
   out.connectionLength = length;
 
-  return out;
+  return;
 }
