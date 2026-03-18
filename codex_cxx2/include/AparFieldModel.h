@@ -12,14 +12,12 @@ public:
 
     const AparData& data() const { return data_; }
 
-    void evaluateStage(double x,
-                       double z,
+    void evaluateStage(const XZPoint& point,
                        int yStart1b,
                        int region,
                        int direction,
                        int stage,
-                       double& dxdy,
-                       double& dzdy) const;
+                       XZDeriv& deriv) const;
 
     double interp1(const std::vector<double>& xp,
                    const std::vector<double>& fp,
@@ -27,8 +25,7 @@ public:
 
     Point3D reconstructTrajectoryXYZ(const TrajectoryState& state) const;
 
-    Point3D reconstructPunctureXYZ(double xind,
-                                   double yind,
+    Point3D reconstructPunctureXYZ(const Point2D& ind,
                                    double zvalue) const;
 
     double thetaFromY(double yind) const;

@@ -15,11 +15,19 @@ struct Point3D {
     double z = 0.0;
 };
 
+struct XZPoint {
+    double x = 0.0;
+    double z = 0.0;
+};
+
+struct XZDeriv {
+    double dxdy = 0.0;
+    double dzdy = 0.0;
+};
+
 struct TrajectoryState {
     int turn = 0;
-    double xind = 0.0;   // MATLAB 1-based continuous x-index
-    double yind = 0.0;   // MATLAB 1-based y-index (integer-valued in stepping)
-    double zind = 0.0;   // MATLAB 1-based continuous z-index
+    Point3D ind;         // MATLAB 1-based continuous index-space point (xind,yind,zind)
     int region = 0;
     double segmentLength = 0.0;
     double rawZ = 0.0;   // unwrapped zEnd for branch-cut-safe puncture interpolation

@@ -14,7 +14,11 @@ public:
 private:
   const AparFieldModel& model_;
 
-  void rk4Step(double xStart, int yStart, double zStart, int region, int direction, double& xEnd, double& yEnd, double& zEnd) const;
+  void rk4Step(const XZPoint& start,
+               int yStart,
+               int region,
+               int direction,
+               XZPoint& end) const;
 };
 
 #endif

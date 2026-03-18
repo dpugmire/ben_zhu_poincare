@@ -8,8 +8,7 @@
 namespace {
 
 struct CrossingEval {
-    double xind = 0.0;
-    double yind = 0.0;
+    Point2D ind;
     double zvalue = 0.0;
     Point3D xyz;
 };
@@ -29,8 +28,8 @@ CrossingEval evaluateCrossing(const AparFieldModel& model,
     const TrajectoryState& s1 = line.states[tc1];
 
     CrossingEval out;
-    out.xind = beta * s0.xind + alpha * s1.xind;
-    out.yind = beta * s0.yind + alpha * s1.yind;
+    out.ind.x = beta * s0.ind.x + alpha * s1.ind.x;
+    out.ind.y = beta * s0.ind.y + alpha * s1.ind.y;
 
     out.zvalue = beta * s0.rawZ + alpha * s1.rawZ;
     if (std::fabs(s0.rawZ - s1.rawZ) > 1.0) {
@@ -39,27 +38,27 @@ CrossingEval evaluateCrossing(const AparFieldModel& model,
         out.zvalue = beta * z0 + alpha * z1;
     }
 
-    if (static_cast<int>(std::round(s0.yind)) == d.nypf2 &&
+    if (static_cast<int>(std::round(s0.ind.y)) == d.nypf2 &&
         direction == 1 &&
-        out.xind < static_cast<double>(d.ixsep) + 0.5) {
-        out.yind = beta * s0.yind + alpha * static_cast<double>(d.nypf2 + 1);
-    } else if (static_cast<int>(std::round(s0.yind)) == (d.nypf1 + 1) &&
+        out.ind.x < static_cast<double>(d.ixsep) + 0.5) {
+        out.ind.y = beta * s0.ind.y + alpha * static_cast<double>(d.nypf2 + 1);
+    } else if (static_cast<int>(std::round(s0.ind.y)) == (d.nypf1 + 1) &&
                direction == -1 &&
-               out.xind < static_cast<double>(d.ixsep) + 0.5) {
-        out.yind = beta * static_cast<double>(d.nypf2 + 1) + alpha * s1.yind;
-        const double shift = model.interp1(d.xiarray, d.shiftAngle, out.xind);
+               out.ind.x < static_cast<double>(d.ixsep) + 0.5) {
+        out.ind.y = beta * static_cast<double>(d.nypf2 + 1) + alpha * s1.ind.y;
+        const double shift = model.interp1(d.xiarray, d.shiftAngle, out.ind.x);
         out.zvalue = d.wrapZ(out.zvalue - shift);
     } else if (tc0 > 0) {
-        const int yPrev = static_cast<int>(std::round(line.states[tc0 - 1].yind));
+        const int yPrev = static_cast<int>(std::round(line.states[tc0 - 1].ind.y));
         if (yPrev == d.nypf2 || yPrev == (d.nypf1 + 1)) {
-            const double z0 = model.interp1(d.ziarray, d.zarray, s0.zind);
-            const double z1 = model.interp1(d.ziarray, d.zarray, s1.zind);
+            const double z0 = model.interp1(d.ziarray, d.zarray, s0.ind.z);
+            const double z1 = model.interp1(d.ziarray, d.zarray, s1.ind.z);
             out.zvalue = beta * z0 + alpha * z1;
         }
     }
 
     out.zvalue = d.wrapZ(out.zvalue);
-    out.xyz = model.reconstructPunctureXYZ(out.xind, out.yind, out.zvalue);
+    out.xyz = model.reconstructPunctureXYZ(out.ind, out.zvalue);
     return out;
 }
 
@@ -132,8 +131,8 @@ void PunctureDetector::detect(LineTraceResult& line,
             if (crossing.xyz.y > 0.0) {
                 PuncturePoint puncture;
                 puncture.xyz = crossing.xyz;
-                puncture.thetaPsi.x = model_.thetaFromY(crossing.yind);
-                puncture.thetaPsi.y = model_.psiFromX(crossing.xind);
+                puncture.thetaPsi.x = model_.thetaFromY(crossing.ind.y);
+                puncture.thetaPsi.y = model_.psiFromX(crossing.ind.x);
 
                 int step = static_cast<int>(std::floor(fitRoot));
                 if (step < 1) {

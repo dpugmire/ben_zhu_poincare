@@ -8,8 +8,7 @@ namespace
 
 struct CrossingEval
 {
-  double xind = 0.0;
-  double yind = 0.0;
+  Point2D ind;
   double zvalue = 0.0;
   Point3D xyz;
 };
@@ -25,8 +24,8 @@ CrossingEval evaluateCrossing(const AparFieldModel& model, const LineTraceResult
   const TrajectoryState& s1 = line.states[tc1];
 
   CrossingEval out;
-  out.xind = beta * s0.xind + alpha * s1.xind;
-  out.yind = beta * s0.yind + alpha * s1.yind;
+  out.ind.x = beta * s0.ind.x + alpha * s1.ind.x;
+  out.ind.y = beta * s0.ind.y + alpha * s1.ind.y;
 
   out.zvalue = beta * s0.rawZ + alpha * s1.rawZ;
   if (std::fabs(s0.rawZ - s1.rawZ) > 1.0)
@@ -36,29 +35,29 @@ CrossingEval evaluateCrossing(const AparFieldModel& model, const LineTraceResult
     out.zvalue = beta * z0 + alpha * z1;
   }
 
-  if (static_cast<int>(std::round(s0.yind)) == d.nypf2 && direction == 1 && out.xind < static_cast<double>(d.ixsep) + 0.5)
+  if (static_cast<int>(std::round(s0.ind.y)) == d.nypf2 && direction == 1 && out.ind.x < static_cast<double>(d.ixsep) + 0.5)
   {
-    out.yind = beta * s0.yind + alpha * static_cast<double>(d.nypf2 + 1);
+    out.ind.y = beta * s0.ind.y + alpha * static_cast<double>(d.nypf2 + 1);
   }
-  else if (static_cast<int>(std::round(s0.yind)) == (d.nypf1 + 1) && direction == -1 && out.xind < static_cast<double>(d.ixsep) + 0.5)
+  else if (static_cast<int>(std::round(s0.ind.y)) == (d.nypf1 + 1) && direction == -1 && out.ind.x < static_cast<double>(d.ixsep) + 0.5)
   {
-    out.yind = beta * static_cast<double>(d.nypf2 + 1) + alpha * s1.yind;
-    const double shift = model.interp1(d.xiarray, d.shiftAngle, out.xind);
+    out.ind.y = beta * static_cast<double>(d.nypf2 + 1) + alpha * s1.ind.y;
+    const double shift = model.interp1(d.xiarray, d.shiftAngle, out.ind.x);
     out.zvalue = d.wrapZ(out.zvalue - shift);
   }
   else if (tc0 > 0)
   {
-    const int yPrev = static_cast<int>(std::round(line.states[tc0 - 1].yind));
+    const int yPrev = static_cast<int>(std::round(line.states[tc0 - 1].ind.y));
     if (yPrev == d.nypf2 || yPrev == (d.nypf1 + 1))
     {
-      const double z0 = model.interp1(d.ziarray, d.zarray, s0.zind);
-      const double z1 = model.interp1(d.ziarray, d.zarray, s1.zind);
+      const double z0 = model.interp1(d.ziarray, d.zarray, s0.ind.z);
+      const double z1 = model.interp1(d.ziarray, d.zarray, s1.ind.z);
       out.zvalue = beta * z0 + alpha * z1;
     }
   }
 
   out.zvalue = d.wrapZ(out.zvalue);
-  out.xyz = model.reconstructPunctureXYZ(out.xind, out.yind, out.zvalue);
+  out.xyz = model.reconstructPunctureXYZ(out.ind, out.zvalue);
   return out;
 }
 
@@ -192,8 +191,8 @@ void tryDetectPunctureOnLastSegment(const AparFieldModel& model, LineTraceResult
 
   PuncturePoint puncture;
   puncture.xyz = crossing.xyz;
-  puncture.thetaPsi.x = model.thetaFromY(crossing.yind);
-  puncture.thetaPsi.y = model.psiFromX(crossing.xind);
+  puncture.thetaPsi.x = model.thetaFromY(crossing.ind.y);
+  puncture.thetaPsi.y = model.psiFromX(crossing.ind.x);
 
   int step = static_cast<int>(std::floor(fitRoot));
   if (step < 1)
@@ -217,38 +216,37 @@ FieldLineIntegrator::FieldLineIntegrator(const AparFieldModel& model)
 {
 }
 
-void FieldLineIntegrator::rk4Step(double xStart, int yStart, double zStart, int region, int direction, double& xEnd, double& yEnd, double& zEnd) const
+void FieldLineIntegrator::rk4Step(const XZPoint& start,
+                                  int yStart,
+                                  int region,
+                                  int direction,
+                                  XZPoint& end) const
 {
   constexpr double h = 1.0;
   const double hh = 0.5 * h;
   const double h6 = h / 6.0;
 
-  double dxdy1 = 0.0;
-  double dzdy1 = 0.0;
-  double dxdy2 = 0.0;
-  double dzdy2 = 0.0;
-  double dxdy3 = 0.0;
-  double dzdy3 = 0.0;
-  double dxdy4 = 0.0;
-  double dzdy4 = 0.0;
+  XZDeriv k1;
+  XZDeriv k2;
+  XZDeriv k3;
+  XZDeriv k4;
 
-  model_.evaluateStage(xStart, zStart, yStart, region, direction, 0, dxdy1, dzdy1);
-  const double x1 = xStart + direction * hh * dxdy1;
-  const double z1 = zStart + direction * hh * dzdy1;
+  model_.evaluateStage(start, yStart, region, direction, 0, k1);
+  const XZPoint p1{start.x + direction * hh * k1.dxdy,
+                   start.z + direction * hh * k1.dzdy};
 
-  model_.evaluateStage(x1, z1, yStart, region, direction, 1, dxdy2, dzdy2);
-  const double x2 = xStart + direction * hh * dxdy2;
-  const double z2 = zStart + direction * hh * dzdy2;
+  model_.evaluateStage(p1, yStart, region, direction, 1, k2);
+  const XZPoint p2{start.x + direction * hh * k2.dxdy,
+                   start.z + direction * hh * k2.dzdy};
 
-  model_.evaluateStage(x2, z2, yStart, region, direction, 1, dxdy3, dzdy3);
-  const double x3 = xStart + direction * dxdy3;
-  const double z3 = zStart + direction * dzdy3;
+  model_.evaluateStage(p2, yStart, region, direction, 1, k3);
+  const XZPoint p3{start.x + direction * k3.dxdy,
+                   start.z + direction * k3.dzdy};
 
-  model_.evaluateStage(x3, z3, yStart, region, direction, 2, dxdy4, dzdy4);
+  model_.evaluateStage(p3, yStart, region, direction, 2, k4);
 
-  xEnd = xStart + direction * h6 * (dxdy1 + 2.0 * dxdy2 + 2.0 * dxdy3 + dxdy4);
-  zEnd = zStart + direction * h6 * (dzdy1 + 2.0 * dzdy2 + 2.0 * dzdy3 + dzdy4);
-  yEnd = (direction == 1) ? (yStart + h) : (yStart - h);
+  end.x = start.x + direction * h6 * (k1.dxdy + 2.0 * k2.dxdy + 2.0 * k3.dxdy + k4.dxdy);
+  end.z = start.z + direction * h6 * (k1.dzdy + 2.0 * k2.dzdy + 2.0 * k3.dzdy + k4.dzdy);
 }
 
 LineTraceResult FieldLineIntegrator::traceLine(double iline, const TraceOptions& options) const
@@ -270,9 +268,10 @@ LineTraceResult FieldLineIntegrator::traceLine(double iline, const TraceOptions&
   out.punctures.reserve(static_cast<size_t>(std::max(0, options.npMax)));
 
   double xind = iline;
-  double xStart = model_.interp1(d.xiarray, d.xarray, xind);
+  XZPoint current;
+  current.x = model_.interp1(d.xiarray, d.xarray, xind);
   int yStart = d.jyomp + 1;
-  double zStart = d.zarray.empty() ? 0.0 : d.zarray.front();
+  current.z = d.zarray.empty() ? 0.0 : d.zarray.front();
 
   int region = 1;
   if (xind < static_cast<double>(d.ixsep) + 0.5)
@@ -284,16 +283,16 @@ LineTraceResult FieldLineIntegrator::traceLine(double iline, const TraceOptions&
     }
   }
 
-  const double zind0 = model_.interp1(d.zarray, d.ziarray, zStart);
+  const double zind0 = model_.interp1(d.zarray, d.ziarray, current.z);
 
   TrajectoryState initial;
   initial.turn = 1;
-  initial.xind = xind;
-  initial.yind = static_cast<double>(yStart);
-  initial.zind = zind0;
+  initial.ind.x = xind;
+  initial.ind.y = static_cast<double>(yStart);
+  initial.ind.z = zind0;
   initial.region = region;
   initial.segmentLength = 0.0;
-  initial.rawZ = zStart;
+  initial.rawZ = current.z;
   out.states.push_back(initial);
   out.trajectoryXYZ.push_back(model_.reconstructTrajectoryXYZ(initial));
 
@@ -309,26 +308,27 @@ LineTraceResult FieldLineIntegrator::traceLine(double iline, const TraceOptions&
         break;
       }
 
-      double xEnd = xStart;
-      double zEnd = zStart;
-      double yEnd = static_cast<double>(yStart);
+      XZPoint next = current;
+      int yEnd = yStart;
 
       if (region == 0 && yStart > d.nypf1 && yStart < d.nypf2 + 1)
       {
-        rk4Step(xStart, yStart, zStart, region, options.direction, xEnd, yEnd, zEnd);
-        const double rawZEnd = zEnd;
+        rk4Step(current, yStart, region, options.direction, next);
+        const double rawZEnd = next.z;
 
-        if (xEnd > d.xMax)
+        yEnd = (options.direction == 1) ? (yStart + 1) : (yStart - 1);
+
+        if (next.x > d.xMax)
         {
           region = 12;
         }
-        else if (xEnd < d.xMin)
+        else if (next.x < d.xMin)
         {
           region = 11;
         }
         else
         {
-          xind = model_.interp1(d.xarray, d.xiarray, xEnd);
+          xind = model_.interp1(d.xarray, d.xiarray, next.x);
           if (xind > static_cast<double>(d.ixsep) + 0.5)
           {
             region = 1;
@@ -338,24 +338,24 @@ LineTraceResult FieldLineIntegrator::traceLine(double iline, const TraceOptions&
         if (options.direction == 1 && yStart == d.nypf2 && region == 0)
         {
           const double shift = model_.interp1(d.xiarray, d.shiftAngle, xind);
-          zEnd += shift;
+          next.z += shift;
           yEnd = d.nypf1 + 1;
         }
         if (options.direction == -1 && yStart == (d.nypf1 + 1) && region == 0)
         {
           const double shift = model_.interp1(d.xiarray, d.shiftAngle, xind);
-          zEnd -= shift;
+          next.z -= shift;
           yEnd = d.nypf2;
         }
 
-        zEnd = d.wrapZ(zEnd);
-        const double zind = model_.interp1(d.zarray, d.ziarray, zEnd);
+        next.z = d.wrapZ(next.z);
+        const double zind = model_.interp1(d.zarray, d.ziarray, next.z);
 
         TrajectoryState step;
         step.turn = iturn;
-        step.xind = xind;
-        step.yind = static_cast<double>(yEnd);
-        step.zind = zind;
+        step.ind.x = xind;
+        step.ind.y = static_cast<double>(yEnd);
+        step.ind.z = zind;
         step.region = region;
         step.segmentLength = 0.0;
         step.rawZ = rawZEnd;
@@ -363,14 +363,15 @@ LineTraceResult FieldLineIntegrator::traceLine(double iline, const TraceOptions&
         out.trajectoryXYZ.push_back(model_.reconstructTrajectoryXYZ(step));
         tryDetectPunctureOnLastSegment(model_, out, options.direction, options.npMax, lastFitRoot);
 
-        xStart = xEnd;
+        current = next;
         yStart = yEnd;
-        zStart = zEnd;
       }
       else if (region == 1 || region == 2)
       {
-        rk4Step(xStart, yStart, zStart, region, options.direction, xEnd, yEnd, zEnd);
-        const double rawZEnd = zEnd;
+        rk4Step(current, yStart, region, options.direction, next);
+        const double rawZEnd = next.z;
+
+        yEnd = (options.direction == 1) ? (yStart + 1) : (yStart - 1);
 
         if (options.direction == 1 && yStart == d.nypf1 && region == 2)
         {
@@ -381,17 +382,17 @@ LineTraceResult FieldLineIntegrator::traceLine(double iline, const TraceOptions&
           yEnd = d.nypf1;
         }
 
-        if (xEnd > d.xMax)
+        if (next.x > d.xMax)
         {
           region = 12;
         }
-        else if (xEnd < d.xMin)
+        else if (next.x < d.xMin)
         {
           region = 11;
         }
         else
         {
-          xind = model_.interp1(d.xarray, d.xiarray, xEnd);
+          xind = model_.interp1(d.xarray, d.xiarray, next.x);
           if (xind < static_cast<double>(d.ixsep) + 0.5 && yEnd > d.nypf1 && yEnd < d.nypf2 + 1)
           {
             region = 0;
@@ -411,14 +412,14 @@ LineTraceResult FieldLineIntegrator::traceLine(double iline, const TraceOptions&
           region = 13;
         }
 
-        zEnd = d.wrapZ(zEnd);
-        const double zind = model_.interp1(d.zarray, d.ziarray, zEnd);
+        next.z = d.wrapZ(next.z);
+        const double zind = model_.interp1(d.zarray, d.ziarray, next.z);
 
         TrajectoryState step;
         step.turn = iturn;
-        step.xind = xind;
-        step.yind = static_cast<double>(yEnd);
-        step.zind = zind;
+        step.ind.x = xind;
+        step.ind.y = static_cast<double>(yEnd);
+        step.ind.z = zind;
         step.region = region;
         step.segmentLength = 0.0;
         step.rawZ = rawZEnd;
@@ -426,9 +427,8 @@ LineTraceResult FieldLineIntegrator::traceLine(double iline, const TraceOptions&
         out.trajectoryXYZ.push_back(model_.reconstructTrajectoryXYZ(step));
         tryDetectPunctureOnLastSegment(model_, out, options.direction, options.npMax, lastFitRoot);
 
-        xStart = xEnd;
+        current = next;
         yStart = yEnd;
-        zStart = zEnd;
       }
       else
       {

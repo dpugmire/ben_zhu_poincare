@@ -322,14 +322,12 @@ double AparFieldModel::interpXZ2DSpline(const std::vector<double>& data2d,
         zinterp[0], zinterp[1], zinterp[2], zinterp[3]);
 }
 
-void AparFieldModel::evaluateStage(double x,
-                                   double z,
+void AparFieldModel::evaluateStage(const XZPoint& point,
                                    int yStart1b,
                                    int region,
                                    int direction,
                                    int stage,
-                                   double& dxdy,
-                                   double& dzdy) const {
+                                   XZDeriv& deriv) const {
     stage = Interpolator::clampInt(stage, 0, 2);
 
     int yp = yStart1b - 1;
@@ -360,57 +358,57 @@ void AparFieldModel::evaluateStage(double x,
     }
 
     if (stage == 0) {
-        dxdy = interpXZ3DAtYSpline(data_.dxdy, yp, x, z);
-        dzdy = interpXZ3DAtYSpline(data_.dzdy, yp, x, z);
+        deriv.dxdy = interpXZ3DAtYSpline(data_.dxdy, yp, point.x, point.z);
+        deriv.dzdy = interpXZ3DAtYSpline(data_.dzdy, yp, point.x, point.z);
         return;
     }
 
     if (stage == 2) {
         if (useTwist) {
             if (usePlus) {
-                dxdy = interpXZ2DSpline(data_.dxdy_p1, x, z);
-                dzdy = interpXZ2DSpline(data_.dzdy_p1, x, z);
+                deriv.dxdy = interpXZ2DSpline(data_.dxdy_p1, point.x, point.z);
+                deriv.dzdy = interpXZ2DSpline(data_.dzdy_p1, point.x, point.z);
             } else {
-                dxdy = interpXZ2DSpline(data_.dxdy_m1, x, z);
-                dzdy = interpXZ2DSpline(data_.dzdy_m1, x, z);
+                deriv.dxdy = interpXZ2DSpline(data_.dxdy_m1, point.x, point.z);
+                deriv.dzdy = interpXZ2DSpline(data_.dzdy_m1, point.x, point.z);
             }
         } else {
-            dxdy = interpXZ3DAtYSpline(data_.dxdy, yn, x, z);
-            dzdy = interpXZ3DAtYSpline(data_.dzdy, yn, x, z);
+            deriv.dxdy = interpXZ3DAtYSpline(data_.dxdy, yn, point.x, point.z);
+            deriv.dzdy = interpXZ3DAtYSpline(data_.dzdy, yn, point.x, point.z);
         }
         return;
     }
 
-    const double dxP = interpXZ3DAtYSpline(data_.dxdy, yp, x, z);
-    const double dzP = interpXZ3DAtYSpline(data_.dzdy, yp, x, z);
+    const double dxP = interpXZ3DAtYSpline(data_.dxdy, yp, point.x, point.z);
+    const double dzP = interpXZ3DAtYSpline(data_.dzdy, yp, point.x, point.z);
 
     double dxN = 0.0;
     double dzN = 0.0;
     if (useTwist) {
         if (usePlus) {
-            dxN = interpXZ2DSpline(data_.dxdy_p1, x, z);
-            dzN = interpXZ2DSpline(data_.dzdy_p1, x, z);
+            dxN = interpXZ2DSpline(data_.dxdy_p1, point.x, point.z);
+            dzN = interpXZ2DSpline(data_.dzdy_p1, point.x, point.z);
         } else {
-            dxN = interpXZ2DSpline(data_.dxdy_m1, x, z);
-            dzN = interpXZ2DSpline(data_.dzdy_m1, x, z);
+            dxN = interpXZ2DSpline(data_.dxdy_m1, point.x, point.z);
+            dzN = interpXZ2DSpline(data_.dzdy_m1, point.x, point.z);
         }
     } else {
-        dxN = interpXZ3DAtYSpline(data_.dxdy, yn, x, z);
-        dzN = interpXZ3DAtYSpline(data_.dzdy, yn, x, z);
+        dxN = interpXZ3DAtYSpline(data_.dxdy, yn, point.x, point.z);
+        dzN = interpXZ3DAtYSpline(data_.dzdy, yn, point.x, point.z);
     }
 
-    dxdy = 0.5 * (dxP + dxN);
-    dzdy = 0.5 * (dzP + dzN);
+    deriv.dxdy = 0.5 * (dxP + dxN);
+    deriv.dzdy = 0.5 * (dzP + dzN);
 }
 
 Point3D AparFieldModel::reconstructTrajectoryXYZ(const TrajectoryState& state) const {
-    int yidx = static_cast<int>(std::round(state.yind)) - 1;
+    int yidx = static_cast<int>(std::round(state.ind.y)) - 1;
     yidx = Interpolator::clampInt(yidx, 0, data_.ny - 1);
 
-    const double rxyValue = interpXIndex2D(data_.rxy, yidx, state.xind);
-    const double zsValue = interpXIndex2D(data_.zShift, yidx, state.xind);
-    const double zxyValue = interpXIndex2D(data_.zxy, yidx, state.xind);
-    const double zValue = interp1(data_.ziarray, data_.zarray, state.zind);
+    const double rxyValue = interpXIndex2D(data_.rxy, yidx, state.ind.x);
+    const double zsValue = interpXIndex2D(data_.zShift, yidx, state.ind.x);
+    const double zxyValue = interpXIndex2D(data_.zxy, yidx, state.ind.x);
+    const double zValue = interp1(data_.ziarray, data_.zarray, state.ind.z);
 
     const double x3dTmp = rxyValue * std::cos(zsValue);
     const double y3dTmp = rxyValue * std::sin(zsValue);
@@ -422,8 +420,7 @@ Point3D AparFieldModel::reconstructTrajectoryXYZ(const TrajectoryState& state) c
     return p;
 }
 
-Point3D AparFieldModel::reconstructPunctureXYZ(double xind,
-                                                double yind,
+Point3D AparFieldModel::reconstructPunctureXYZ(const Point2D& ind,
                                                 double zvalue) const {
     Point3D p;
 
@@ -431,20 +428,20 @@ Point3D AparFieldModel::reconstructPunctureXYZ(double xind,
     double zxyValue = 0.0;
     double zsValue = 0.0;
 
-    if (xind < static_cast<double>(data_.ixsep) + 0.5) {
+    if (ind.x < static_cast<double>(data_.ixsep) + 0.5) {
         rxyValue = Interpolator::spline2D(
-            data_.xiarray_cfr, data_.yiarray_cfr, data_.rxy_cfr, data_.nx_cfr, data_.ny_cfr, xind, yind);
+            data_.xiarray_cfr, data_.yiarray_cfr, data_.rxy_cfr, data_.nx_cfr, data_.ny_cfr, ind.x, ind.y);
         zxyValue = Interpolator::spline2D(
-            data_.xiarray_cfr, data_.yiarray_cfr, data_.zxy_cfr, data_.nx_cfr, data_.ny_cfr, xind, yind);
+            data_.xiarray_cfr, data_.yiarray_cfr, data_.zxy_cfr, data_.nx_cfr, data_.ny_cfr, ind.x, ind.y);
         zsValue = Interpolator::spline2D(
-            data_.xiarray_cfr, data_.yiarray_cfr, data_.zShift_cfr, data_.nx_cfr, data_.ny_cfr, xind, yind);
+            data_.xiarray_cfr, data_.yiarray_cfr, data_.zShift_cfr, data_.nx_cfr, data_.ny_cfr, ind.x, ind.y);
     } else {
         rxyValue = Interpolator::spline2D(
-            data_.xiarray, data_.yiarray, data_.rxy, data_.nx, data_.ny, xind, yind);
+            data_.xiarray, data_.yiarray, data_.rxy, data_.nx, data_.ny, ind.x, ind.y);
         zxyValue = Interpolator::spline2D(
-            data_.xiarray, data_.yiarray, data_.zxy, data_.nx, data_.ny, xind, yind);
+            data_.xiarray, data_.yiarray, data_.zxy, data_.nx, data_.ny, ind.x, ind.y);
         zsValue = Interpolator::spline2D(
-            data_.xiarray, data_.yiarray, data_.zShift, data_.nx, data_.ny, xind, yind);
+            data_.xiarray, data_.yiarray, data_.zShift, data_.nx, data_.ny, ind.x, ind.y);
     }
 
     const double ipx3dTmp = rxyValue * std::cos(zsValue);
