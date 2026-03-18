@@ -37,6 +37,40 @@ void writeLineToStreams(const LineTraceResult& line,
     }
 }
 
+void writeBatchLineToStreams(const PackedLineTraceBatch& batch,
+                             size_t lineIndex,
+                             std::ofstream& ipOut,
+                             std::ofstream& tpOut,
+                             std::ofstream& trajOut) {
+    const std::string lineToken = formatLineToken(batch.iline[lineIndex]);
+    const size_t stateBase = batch.stateOffset(lineIndex);
+    const size_t punctureBase = batch.punctureOffset(lineIndex);
+
+    const int trajCount = batch.trajectoryCount[lineIndex];
+    for (int i = 0; i < trajCount; ++i) {
+        const size_t idx = stateBase + static_cast<size_t>(i);
+        if (!batch.trajectorySet[idx]) {
+            continue;
+        }
+        const Point3D& p = batch.trajectoryXYZ[idx];
+        trajOut << lineToken << " " << (i + 1) << " "
+                << p.x << " " << p.y << " " << p.z << "\n";
+    }
+
+    const int punctureCount = batch.punctureCount[lineIndex];
+    for (int i = 0; i < punctureCount; ++i) {
+        const size_t idx = punctureBase + static_cast<size_t>(i);
+        if (!batch.punctureSet[idx]) {
+            continue;
+        }
+        const PuncturePoint& p = batch.punctures[idx];
+        ipOut << lineToken << " " << p.step << " "
+              << p.xyz.x << " " << p.xyz.y << " " << p.xyz.z << "\n";
+        tpOut << lineToken << " " << p.step << " "
+              << 0.0 << " " << p.thetaPsi.x << " " << p.thetaPsi.y << "\n";
+    }
+}
+
 }  // namespace
 
 void PoincareOutput::writeLineOutputs(const LineTraceResult& line,
@@ -92,5 +126,33 @@ void PoincareOutput::writeCombinedOutputs(const std::vector<LineTraceResult>& li
 
     for (const LineTraceResult& line : lines) {
         writeLineToStreams(line, ipOut, tpOut, trajOut);
+    }
+}
+
+void PoincareOutput::writeCombinedOutputs(const PackedLineTraceBatch& batch,
+                                          const std::string& outputDir) const {
+    std::filesystem::create_directories(outputDir);
+
+    const std::string ipPath = outputDir + "/ip_cxx.txt";
+    const std::string tpPath = outputDir + "/ip_cxx.TP.txt";
+    const std::string trajPath = outputDir + "/traj_cxx.txt";
+
+    std::ofstream ipOut(ipPath);
+    std::ofstream tpOut(tpPath);
+    std::ofstream trajOut(trajPath);
+    if (!ipOut || !tpOut || !trajOut) {
+        throw std::runtime_error("Failed to open combined output files for writing");
+    }
+
+    ipOut << "iline it ipx ipy ipz\n";
+    tpOut << "iline it dummy theta psi\n";
+    trajOut << "iline it x y z\n";
+
+    ipOut << std::setprecision(16);
+    tpOut << std::setprecision(16);
+    trajOut << std::setprecision(16);
+
+    for (size_t i = 0; i < batch.lineCount(); ++i) {
+        writeBatchLineToStreams(batch, i, ipOut, tpOut, trajOut);
     }
 }

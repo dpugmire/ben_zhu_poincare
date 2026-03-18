@@ -13,6 +13,9 @@ public:
 
     void writeCombinedOutputs(const std::vector<LineTraceResult>& lines,
                               const std::string& outputDir) const;
+
+    void writeCombinedOutputs(const PackedLineTraceBatch& batch,
+                              const std::string& outputDir) const;
 };
 
 #endif

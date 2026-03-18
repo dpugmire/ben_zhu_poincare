@@ -1,6 +1,7 @@
 #ifndef CODEX_CXX2_TYPES_H
 #define CODEX_CXX2_TYPES_H
 
+#include <cstddef>
 #include <string>
 #include <vector>
 
@@ -52,6 +53,63 @@ struct TraceOptions {
     int direction = 1;
     int npMax = 100;
     int maxSteps = 0;   // <=0 => auto cap: kDefaultMaxStepsPerPuncture * npMax
+};
+
+struct PackedLineTraceBatch {
+    int maxStatesPerLine = 0;
+    int maxPuncturesPerLine = 0;
+
+    std::vector<Point3D> seeds;
+    std::vector<double> iline;
+    std::vector<int> endRegion;
+    std::vector<double> connectionLength;
+    std::vector<int> stateCount;
+    std::vector<int> trajectoryCount;
+    std::vector<int> punctureCount;
+
+    std::vector<TrajectoryState> states;
+    std::vector<Point3D> trajectoryXYZ;
+    std::vector<PuncturePoint> punctures;
+
+    std::vector<bool> stateSet;
+    std::vector<bool> trajectorySet;
+    std::vector<bool> punctureSet;
+
+    size_t lineCount() const {
+        return iline.size();
+    }
+
+    size_t stateOffset(size_t lineIndex) const {
+        return lineIndex * static_cast<size_t>(maxStatesPerLine);
+    }
+
+    size_t punctureOffset(size_t lineIndex) const {
+        return lineIndex * static_cast<size_t>(maxPuncturesPerLine);
+    }
+
+    void resize(size_t lines, int maxStates, int maxPunctures) {
+        maxStatesPerLine = (maxStates > 0) ? maxStates : 1;
+        maxPuncturesPerLine = (maxPunctures > 0) ? maxPunctures : 1;
+
+        seeds.assign(lines, Point3D{});
+        iline.assign(lines, 0.0);
+        endRegion.assign(lines, 0);
+        connectionLength.assign(lines, 0.0);
+        stateCount.assign(lines, 0);
+        trajectoryCount.assign(lines, 0);
+        punctureCount.assign(lines, 0);
+
+        const size_t totalStateSlots = lines * static_cast<size_t>(maxStatesPerLine);
+        const size_t totalPunctureSlots = lines * static_cast<size_t>(maxPuncturesPerLine);
+
+        states.assign(totalStateSlots, TrajectoryState{});
+        trajectoryXYZ.assign(totalStateSlots, Point3D{});
+        punctures.assign(totalPunctureSlots, PuncturePoint{});
+
+        stateSet.assign(totalStateSlots, false);
+        trajectorySet.assign(totalStateSlots, false);
+        punctureSet.assign(totalPunctureSlots, false);
+    }
 };
 
 struct ValidationCase {
