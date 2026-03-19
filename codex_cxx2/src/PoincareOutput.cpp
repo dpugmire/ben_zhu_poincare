@@ -203,7 +203,9 @@ void PoincareOutput::writeCombinedOutputsFlat(const std::vector<double>& ilinePe
                                               const std::vector<Point3D>& trajectories,
                                               const std::vector<PuncturePoint>& punctures,
                                               const std::vector<std::uint8_t>* punctureValid,
-                                              const std::string& outputDir) const {
+                                              const std::string& outputDir,
+                                              bool append,
+                                              bool writeHeader) const {
     if (ilinePerSeed.size() != trajCountPerSeed.size() || ilinePerSeed.size() != punctureCountPerSeed.size()) {
         throw std::runtime_error("Per-seed metadata arrays must all have the same size");
     }
@@ -214,16 +216,19 @@ void PoincareOutput::writeCombinedOutputsFlat(const std::vector<double>& ilinePe
     const std::string tpPath = outputDir + "/ip_cxx.TP.txt";
     const std::string trajPath = outputDir + "/traj_cxx.txt";
 
-    std::ofstream ipOut(ipPath);
-    std::ofstream tpOut(tpPath);
-    std::ofstream trajOut(trajPath);
+    const auto mode = append ? (std::ios::out | std::ios::app) : (std::ios::out | std::ios::trunc);
+    std::ofstream ipOut(ipPath, mode);
+    std::ofstream tpOut(tpPath, mode);
+    std::ofstream trajOut(trajPath, mode);
     if (!ipOut || !tpOut || !trajOut) {
         throw std::runtime_error("Failed to open combined output files for writing");
     }
 
-    ipOut << "iline it ipx ipy ipz\n";
-    tpOut << "iline it dummy theta psi\n";
-    trajOut << "iline it x y z\n";
+    if (writeHeader) {
+        ipOut << "iline it ipx ipy ipz\n";
+        tpOut << "iline it dummy theta psi\n";
+        trajOut << "iline it x y z\n";
+    }
 
     ipOut << std::setprecision(16);
     tpOut << std::setprecision(16);

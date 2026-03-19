@@ -1,13 +1,18 @@
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <iostream>
+#include <limits>
 #include <sstream>
 #include <stdexcept>
 #include <string>
-#include <limits>
 #include <vector>
+
+#if defined(CODEX_USE_MPI)
+#include <mpi.h>
+#endif
 
 #include "AparData.h"
 #include "AparFieldModel.h"
@@ -16,6 +21,67 @@
 #include "ValidationSuite.h"
 
 namespace {
+
+#if defined(CODEX_USE_MPI)
+class MpiRuntime {
+public:
+    MpiRuntime(int* argc, char*** argv) {
+        MPI_Init(argc, argv);
+        initialized_ = true;
+        MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+        MPI_Comm_size(MPI_COMM_WORLD, &size);
+    }
+
+    ~MpiRuntime() {
+        if (initialized_) {
+            MPI_Finalize();
+        }
+    }
+
+    void barrier() const {
+        MPI_Barrier(MPI_COMM_WORLD);
+    }
+
+    int allreduceMaxInt(int localValue) const {
+        int globalValue = localValue;
+        MPI_Allreduce(&localValue, &globalValue, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
+        return globalValue;
+    }
+
+    void abortAll(int code) const {
+        MPI_Abort(MPI_COMM_WORLD, code);
+    }
+
+    int rank = 0;
+    int size = 1;
+
+private:
+    bool initialized_ = false;
+};
+#else
+class MpiRuntime {
+public:
+    explicit MpiRuntime(int*, char***) {}
+
+    void barrier() const {}
+
+    int allreduceMaxInt(int localValue) const {
+        return localValue;
+    }
+
+    void abortAll(int code) const {
+        std::exit(code);
+    }
+
+    int rank = 0;
+    int size = 1;
+};
+#endif
+
+struct TraceTask {
+    std::string divertorTag;
+    Point3D seedInd;
+};
 
 void printUsage(const char* prog) {
     std::cout
@@ -113,92 +179,116 @@ std::vector<Point3D> buildSeedPoints(const std::vector<double>& requestedLines, 
     return seeds;
 }
 
-void runDivertorTrace(const std::string& tag,
-                      const std::string& aparPath,
-                      const std::vector<double>& requestedLines,
-                      const ValidationConfig& config,
-                      bool writePerLineOutput,
-                      PoincareOutput& output,
-                      std::vector<Point3D>& seedsAll,
-                      std::vector<double>& ilinePerSeed,
-                      std::vector<int>& endRegionPerSeed,
-                      std::vector<double>& connectionLengthPerSeed,
-                      std::vector<int>& stateCountPerSeed,
-                      std::vector<int>& trajCountPerSeed,
-                      std::vector<int>& punctureCountPerSeed,
-                      std::vector<TrajectoryState>& states,
-                      std::vector<Point3D>& trajectories,
-                      std::vector<PuncturePoint>& punctures,
-                      std::vector<std::uint8_t>& punctureValid,
-                      int maxStatesPerSeed,
-                      int maxTrajPerSeed,
-                      int maxPuncPerSeed,
-                      size_t seedIndexOffset) {
-    AparData data;
-    data.load(aparPath);
+std::vector<TraceTask> buildAllTasks(const std::vector<double>& requestedLines,
+                                     bool doSingle,
+                                     bool doCirc,
+                                     const AparData* singleData,
+                                     const AparData* circData) {
+    std::vector<TraceTask> allTasks;
+    const size_t divertorCount = static_cast<size_t>((doSingle ? 1 : 0) + (doCirc ? 1 : 0));
+    allTasks.reserve(requestedLines.size() * divertorCount);
 
+    if (doSingle && singleData != nullptr) {
+        const std::vector<Point3D> singleSeeds = buildSeedPoints(requestedLines, *singleData);
+        for (const Point3D& seed : singleSeeds) {
+            TraceTask t;
+            t.divertorTag = "single";
+            t.seedInd = seed;
+            allTasks.push_back(t);
+        }
+    }
+
+    if (doCirc && circData != nullptr) {
+        const std::vector<Point3D> circSeeds = buildSeedPoints(requestedLines, *circData);
+        for (const Point3D& seed : circSeeds) {
+            TraceTask t;
+            t.divertorTag = "circ";
+            t.seedInd = seed;
+            allTasks.push_back(t);
+        }
+    }
+
+    return allTasks;
+}
+
+size_t partitionBegin(size_t totalTasks, int rank, int nranks) {
+    return (totalTasks * static_cast<size_t>(rank)) / static_cast<size_t>(nranks);
+}
+
+size_t partitionEnd(size_t totalTasks, int rank, int nranks) {
+    return (totalTasks * static_cast<size_t>(rank + 1)) / static_cast<size_t>(nranks);
+}
+
+void traceLocalTasksForDivertor(const std::string& tag,
+                                const AparData& data,
+                                const ValidationConfig& config,
+                                const std::vector<TraceTask>& localTasks,
+                                int rank,
+                                int maxStatesPerSeed,
+                                int maxTrajPerSeed,
+                                int maxPuncPerSeed,
+                                std::vector<double>& ilinePerSeed,
+                                std::vector<int>& endRegionPerSeed,
+                                std::vector<double>& connectionLengthPerSeed,
+                                std::vector<int>& stateCountPerSeed,
+                                std::vector<int>& trajCountPerSeed,
+                                std::vector<int>& punctureCountPerSeed,
+                                std::vector<TrajectoryState>& states,
+                                std::vector<Point3D>& trajectories,
+                                std::vector<PuncturePoint>& punctures,
+                                std::vector<std::uint8_t>& punctureValid,
+                                bool& localFatal,
+                                std::string& localFatalMsg) {
     AparFieldModel model(data);
     FieldLineIntegrator integrator(model, config.traceOptions);
-    const std::vector<Point3D> seeds = buildSeedPoints(requestedLines, data);
+
     if (integrator.maxStatesPerSeed() != maxStatesPerSeed ||
         integrator.maxTrajPerSeed() != maxTrajPerSeed ||
         integrator.maxPuncPerSeed() != maxPuncPerSeed) {
-        throw std::runtime_error("Integrator max-per-seed caps differ from preallocated array caps");
+        localFatal = true;
+        localFatalMsg = "Integrator max-per-seed caps differ from preallocated array caps";
+        return;
     }
-    if (seedIndexOffset + seeds.size() > ilinePerSeed.size()) {
-        throw std::runtime_error("Per-seed output arrays are smaller than number of seeds");
-    }
+
     TraceOutputViews outputViews = makeTraceOutputViews(states, trajectories, punctures, &punctureValid);
 
-    for (size_t i = 0; i < seeds.size(); ++i) {
-        const Point3D& seedInd = seeds[i];
-        const size_t seedIndex = seedIndexOffset + i;
-        seedsAll[seedIndex] = seedInd;
-        const TraceStatus traceStatus = integrator.traceLine(seedInd,
-                                                             seedIndex,
-                                                             outputViews,
-                                                             stateCountPerSeed[seedIndex],
-                                                             trajCountPerSeed[seedIndex],
-                                                             punctureCountPerSeed[seedIndex],
-                                                             endRegionPerSeed[seedIndex],
-                                                             connectionLengthPerSeed[seedIndex],
-                                                             ilinePerSeed[seedIndex]);
-        if (isFatalTraceStatus(traceStatus)) {
-            throw std::runtime_error("traceLine failed for seed " + std::to_string(seedIndex) +
-                                     " with status " + traceStatusName(traceStatus));
+    for (size_t localIdx = 0; localIdx < localTasks.size(); ++localIdx) {
+        if (localTasks[localIdx].divertorTag != tag) {
+            continue;
         }
-        std::cout << "Traced " << tag << " line " << seedInd.x
-                  << ": traj=" << trajCountPerSeed[seedIndex]
-                  << ", punctures=" << punctureCountPerSeed[seedIndex];
+
+        const TraceStatus traceStatus = integrator.traceLine(localTasks[localIdx].seedInd,
+                                                             localIdx,
+                                                             outputViews,
+                                                             stateCountPerSeed[localIdx],
+                                                             trajCountPerSeed[localIdx],
+                                                             punctureCountPerSeed[localIdx],
+                                                             endRegionPerSeed[localIdx],
+                                                             connectionLengthPerSeed[localIdx],
+                                                             ilinePerSeed[localIdx]);
+        if (isFatalTraceStatus(traceStatus)) {
+            localFatal = true;
+            localFatalMsg = "traceLine failed on rank " + std::to_string(rank) +
+                            " for local seed " + std::to_string(localIdx) +
+                            " with status " + traceStatusName(traceStatus);
+            return;
+        }
+
+        std::cout << "Rank " << rank << " traced " << tag << " line " << localTasks[localIdx].seedInd.x
+                  << ": traj=" << trajCountPerSeed[localIdx]
+                  << ", punctures=" << punctureCountPerSeed[localIdx];
         if (traceStatus != TraceStatus::Ok) {
             std::cout << ", status=" << traceStatusName(traceStatus);
         }
         std::cout << "\n";
-    }
-
-    if (writePerLineOutput) {
-        for (size_t i = 0; i < seeds.size(); ++i) {
-            const size_t seedIndex = seedIndexOffset + i;
-            output.writeLineOutputsFlat(ilinePerSeed[seedIndex],
-                                        seedIndex,
-                                        maxTrajPerSeed,
-                                        maxPuncPerSeed,
-                                        trajCountPerSeed[seedIndex],
-                                        punctureCountPerSeed[seedIndex],
-                                        trajectories,
-                                        punctures,
-                                        &punctureValid,
-                                        config.outputDir,
-                                        tag);
-        }
-        std::cout << "Wrote per-line outputs for " << tag
-                  << " (" << seeds.size() << " lines)\n";
     }
 }
 
 }  // namespace
 
 int main(int argc, char** argv) {
+    MpiRuntime mpi(&argc, &argv);
+
     ValidationConfig config;
     config.referenceDir = "/Users/dpn/proj/bout++/ben_zhu_poincare/zperiod_5";
     config.outputDir = "./outputs";
@@ -215,7 +305,9 @@ int main(int argc, char** argv) {
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
         if (arg == "--help") {
-            printUsage(argv[0]);
+            if (mpi.rank == 0) {
+                printUsage(argv[0]);
+            }
             return 0;
         }
         if (arg == "--reference-dir" && i + 1 < argc) {
@@ -240,7 +332,9 @@ int main(int argc, char** argv) {
         }
         if (arg == "--lines" && i + 1 < argc) {
             if (lineSpecMode == LineSpecMode::range) {
-                std::cerr << "Error: cannot use both --lines and --nlines\n";
+                if (mpi.rank == 0) {
+                    std::cerr << "Error: cannot use both --lines and --nlines\n";
+                }
                 return 1;
             }
             lineSpecMode = LineSpecMode::csv;
@@ -249,7 +343,9 @@ int main(int argc, char** argv) {
         }
         if (arg == "--nlines" && i + 3 < argc) {
             if (lineSpecMode == LineSpecMode::csv) {
-                std::cerr << "Error: cannot use both --lines and --nlines\n";
+                if (mpi.rank == 0) {
+                    std::cerr << "Error: cannot use both --lines and --nlines\n";
+                }
                 return 1;
             }
             lineSpecMode = LineSpecMode::range;
@@ -257,7 +353,9 @@ int main(int argc, char** argv) {
             const double x1 = std::stod(argv[++i]);
             const int n = std::atoi(argv[++i]);
             if (n <= 0) {
-                std::cerr << "Error: --nlines requires N > 0\n";
+                if (mpi.rank == 0) {
+                    std::cerr << "Error: --nlines requires N > 0\n";
+                }
                 return 1;
             }
             requestedLines = buildLineRange(x0, x1, n);
@@ -284,30 +382,47 @@ int main(int argc, char** argv) {
             continue;
         }
 
-        std::cerr << "Unknown or incomplete argument: " << arg << "\n";
-        printUsage(argv[0]);
+        if (mpi.rank == 0) {
+            std::cerr << "Unknown or incomplete argument: " << arg << "\n";
+            printUsage(argv[0]);
+        }
         return 1;
     }
 
     if (config.traceOptions.direction != 1 && config.traceOptions.direction != -1) {
-        std::cerr << "Error: --direction must be 1 or -1\n";
+        if (mpi.rank == 0) {
+            std::cerr << "Error: --direction must be 1 or -1\n";
+        }
         return 1;
     }
 
     if (config.traceOptions.npMax <= 0) {
-        std::cerr << "Error: --np-max must be positive\n";
+        if (mpi.rank == 0) {
+            std::cerr << "Error: --np-max must be positive\n";
+        }
         return 1;
     }
 
     if (config.traceOptions.maxSteps < 0) {
-        std::cerr << "Error: --max-steps must be non-negative\n";
+        if (mpi.rank == 0) {
+            std::cerr << "Error: --max-steps must be non-negative\n";
+        }
         return 1;
     }
 
     try {
+        if (doCompare && mpi.size > 1) {
+            if (mpi.rank == 0) {
+                std::cerr << "Error: --compare is currently only supported with a single MPI rank\n";
+            }
+            return 1;
+        }
+
         if (doCompare) {
             if (lineSpecMode == LineSpecMode::range) {
-                std::cerr << "Error: --nlines is only supported in trace-only mode (no --compare)\n";
+                if (mpi.rank == 0) {
+                    std::cerr << "Error: --nlines is only supported in trace-only mode (no --compare)\n";
+                }
                 return 1;
             }
 
@@ -316,7 +431,9 @@ int main(int argc, char** argv) {
                 config.linesFilter.reserve(requestedLines.size());
                 for (double line : requestedLines) {
                     if (!isIntegerVal(line)) {
-                        std::cerr << "Error: --compare requires integer line indices; got " << line << "\n";
+                        if (mpi.rank == 0) {
+                            std::cerr << "Error: --compare requires integer line indices; got " << line << "\n";
+                        }
                         return 1;
                     }
                     config.linesFilter.push_back(static_cast<int>(std::llround(line)));
@@ -333,13 +450,16 @@ int main(int argc, char** argv) {
                 }
             }
 
-            std::cout << "\nValidation summary: " << passed << "/" << results.size() << " cases passed\n";
+            if (mpi.rank == 0) {
+                std::cout << "\nValidation summary: " << passed << "/" << results.size() << " cases passed\n";
+            }
             return (passed == static_cast<int>(results.size())) ? 0 : 2;
         }
 
-        // Default mode: trace only, no comparisons.
         if (requestedLines.empty()) {
-            std::cerr << "Error: trace-only mode requires --lines or --nlines\n";
+            if (mpi.rank == 0) {
+                std::cerr << "Error: trace-only mode requires --lines or --nlines\n";
+            }
             return 1;
         }
 
@@ -348,100 +468,174 @@ int main(int argc, char** argv) {
         const bool useCombinedOutput = (lineSpecMode == LineSpecMode::range);
 
         if (!doSingle && !doCirc) {
-            std::cerr << "Error: --divertor must be all|single|circ\n";
+            if (mpi.rank == 0) {
+                std::cerr << "Error: --divertor must be all|single|circ\n";
+            }
             return 1;
         }
 
-        PoincareOutput output;
-        const size_t tracesPerDivertor = requestedLines.size();
-        const size_t divertorCount = static_cast<size_t>((doSingle ? 1 : 0) + (doCirc ? 1 : 0));
-        const size_t totalTraceCount = tracesPerDivertor * divertorCount;
+        AparData singleData;
+        AparData circData;
+        if (doSingle) {
+            singleData.load(config.aparSinglePath);
+        }
+        if (doCirc) {
+            circData.load(config.aparCircPath);
+        }
+
+        const std::vector<TraceTask> allTasks = buildAllTasks(requestedLines,
+                                                              doSingle,
+                                                              doCirc,
+                                                              doSingle ? &singleData : nullptr,
+                                                              doCirc ? &circData : nullptr);
+        const size_t localBegin = partitionBegin(allTasks.size(), mpi.rank, mpi.size);
+        const size_t localEnd = partitionEnd(allTasks.size(), mpi.rank, mpi.size);
+        std::vector<TraceTask> localTasks(allTasks.begin() + static_cast<std::ptrdiff_t>(localBegin),
+                                          allTasks.begin() + static_cast<std::ptrdiff_t>(localEnd));
+
+        mpi.barrier();
+        for (int printer = 0; printer < mpi.size; ++printer) {
+            if (mpi.rank == printer) {
+                std::cout << "Rank " << mpi.rank << " seed IDs:";
+                if (localBegin == localEnd) {
+                    std::cout << " (none)";
+                } else {
+                    for (size_t seedId = localBegin; seedId < localEnd; ++seedId) {
+                        std::cout << " " << seedId;
+                    }
+                }
+                std::cout << "\n";
+            }
+            mpi.barrier();
+        }
+
         const int maxStatesPerSeed = computeMaxStateCount(config.traceOptions);
         const int maxTrajPerSeed = maxStatesPerSeed;
         const int maxPuncPerSeed = std::max(1, config.traceOptions.npMax);
 
-        std::vector<Point3D> seedsAll(totalTraceCount);
-        std::vector<double> ilinePerSeed(totalTraceCount, 0.0);
-        std::vector<int> endRegionPerSeed(totalTraceCount, 0);
-        std::vector<double> connectionLengthPerSeed(totalTraceCount, 0.0);
-        std::vector<int> stateCountPerSeed(totalTraceCount, 0);
-        std::vector<int> trajCountPerSeed(totalTraceCount, 0);
-        std::vector<int> punctureCountPerSeed(totalTraceCount, 0);
-        std::vector<TrajectoryState> states(totalTraceCount * static_cast<size_t>(maxStatesPerSeed));
-        std::vector<Point3D> trajectories(totalTraceCount * static_cast<size_t>(maxTrajPerSeed));
-        std::vector<PuncturePoint> punctures(totalTraceCount * static_cast<size_t>(maxPuncPerSeed));
-        std::vector<std::uint8_t> punctureValid(totalTraceCount * static_cast<size_t>(maxPuncPerSeed), static_cast<std::uint8_t>(0));
+        const size_t localTaskCount = localTasks.size();
+        std::vector<double> ilinePerSeed(localTaskCount, 0.0);
+        std::vector<int> endRegionPerSeed(localTaskCount, 0);
+        std::vector<double> connectionLengthPerSeed(localTaskCount, 0.0);
+        std::vector<int> stateCountPerSeed(localTaskCount, 0);
+        std::vector<int> trajCountPerSeed(localTaskCount, 0);
+        std::vector<int> punctureCountPerSeed(localTaskCount, 0);
+        std::vector<TrajectoryState> states(localTaskCount * static_cast<size_t>(maxStatesPerSeed));
+        std::vector<Point3D> trajectories(localTaskCount * static_cast<size_t>(maxTrajPerSeed));
+        std::vector<PuncturePoint> punctures(localTaskCount * static_cast<size_t>(maxPuncPerSeed));
+        std::vector<std::uint8_t> punctureValid(localTaskCount * static_cast<size_t>(maxPuncPerSeed), static_cast<std::uint8_t>(0));
 
-        size_t seedIndexOffset = 0;
+        bool localFatal = false;
+        std::string localFatalMsg;
 
-        if (doSingle) {
-            runDivertorTrace("single",
-                             config.aparSinglePath,
-                             requestedLines,
-                             config,
-                             !useCombinedOutput,
-                             output,
-                             seedsAll,
-                             ilinePerSeed,
-                             endRegionPerSeed,
-                             connectionLengthPerSeed,
-                             stateCountPerSeed,
-                             trajCountPerSeed,
-                             punctureCountPerSeed,
-                             states,
-                             trajectories,
-                             punctures,
-                             punctureValid,
-                             maxStatesPerSeed,
-                             maxTrajPerSeed,
-                             maxPuncPerSeed,
-                             seedIndexOffset);
-            seedIndexOffset += tracesPerDivertor;
-        }
-        if (doCirc) {
-            runDivertorTrace("circ",
-                             config.aparCircPath,
-                             requestedLines,
-                             config,
-                             !useCombinedOutput,
-                             output,
-                             seedsAll,
-                             ilinePerSeed,
-                             endRegionPerSeed,
-                             connectionLengthPerSeed,
-                             stateCountPerSeed,
-                             trajCountPerSeed,
-                             punctureCountPerSeed,
-                             states,
-                             trajectories,
-                             punctures,
-                             punctureValid,
-                             maxStatesPerSeed,
-                             maxTrajPerSeed,
-                             maxPuncPerSeed,
-                             seedIndexOffset);
-            seedIndexOffset += tracesPerDivertor;
+        if (doSingle && !localFatal) {
+            traceLocalTasksForDivertor("single",
+                                       singleData,
+                                       config,
+                                       localTasks,
+                                       mpi.rank,
+                                       maxStatesPerSeed,
+                                       maxTrajPerSeed,
+                                       maxPuncPerSeed,
+                                       ilinePerSeed,
+                                       endRegionPerSeed,
+                                       connectionLengthPerSeed,
+                                       stateCountPerSeed,
+                                       trajCountPerSeed,
+                                       punctureCountPerSeed,
+                                       states,
+                                       trajectories,
+                                       punctures,
+                                       punctureValid,
+                                       localFatal,
+                                       localFatalMsg);
         }
 
-        if (useCombinedOutput) {
-            output.writeCombinedOutputsFlat(ilinePerSeed,
-                                            trajCountPerSeed,
-                                            punctureCountPerSeed,
-                                            maxTrajPerSeed,
-                                            maxPuncPerSeed,
-                                            trajectories,
-                                            punctures,
-                                            &punctureValid,
-                                            config.outputDir);
-            std::cout << "Wrote combined outputs: " << config.outputDir
-                      << "/ip_cxx.txt, " << config.outputDir << "/ip_cxx.TP.txt"
-                      << " and " << config.outputDir << "/traj_cxx.txt\n";
+        if (doCirc && !localFatal) {
+            traceLocalTasksForDivertor("circ",
+                                       circData,
+                                       config,
+                                       localTasks,
+                                       mpi.rank,
+                                       maxStatesPerSeed,
+                                       maxTrajPerSeed,
+                                       maxPuncPerSeed,
+                                       ilinePerSeed,
+                                       endRegionPerSeed,
+                                       connectionLengthPerSeed,
+                                       stateCountPerSeed,
+                                       trajCountPerSeed,
+                                       punctureCountPerSeed,
+                                       states,
+                                       trajectories,
+                                       punctures,
+                                       punctureValid,
+                                       localFatal,
+                                       localFatalMsg);
         }
 
-        std::cout << "\nTrace-only run complete.\n";
+        const int anyFatal = mpi.allreduceMaxInt(localFatal ? 1 : 0);
+        if (anyFatal != 0) {
+            if (localFatal) {
+                std::cerr << "Error: " << localFatalMsg << "\n";
+            }
+            return 1;
+        }
+
+        PoincareOutput output;
+        mpi.barrier();
+
+        for (int writer = 0; writer < mpi.size; ++writer) {
+            if (mpi.rank == writer) {
+                if (useCombinedOutput) {
+                    output.writeCombinedOutputsFlat(ilinePerSeed,
+                                                    trajCountPerSeed,
+                                                    punctureCountPerSeed,
+                                                    maxTrajPerSeed,
+                                                    maxPuncPerSeed,
+                                                    trajectories,
+                                                    punctures,
+                                                    &punctureValid,
+                                                    config.outputDir,
+                                                    writer != 0,
+                                                    writer == 0);
+                } else {
+                    for (size_t i = 0; i < localTasks.size(); ++i) {
+                        output.writeLineOutputsFlat(ilinePerSeed[i],
+                                                    i,
+                                                    maxTrajPerSeed,
+                                                    maxPuncPerSeed,
+                                                    trajCountPerSeed[i],
+                                                    punctureCountPerSeed[i],
+                                                    trajectories,
+                                                    punctures,
+                                                    &punctureValid,
+                                                    config.outputDir,
+                                                    localTasks[i].divertorTag);
+                    }
+                }
+            }
+            mpi.barrier();
+        }
+
+        if (mpi.rank == 0) {
+            if (useCombinedOutput) {
+                std::cout << "Wrote combined outputs: " << config.outputDir
+                          << "/ip_cxx.txt, " << config.outputDir << "/ip_cxx.TP.txt"
+                          << " and " << config.outputDir << "/traj_cxx.txt\n";
+            } else {
+                std::cout << "Wrote per-line outputs in rank order\n";
+            }
+            std::cout << "\nTrace-only run complete.\n";
+        }
         return 0;
     } catch (const std::exception& ex) {
         std::cerr << "Error: " << ex.what() << "\n";
+#if defined(CODEX_USE_MPI)
+        if (mpi.size > 1) {
+            mpi.abortAll(1);
+        }
+#endif
         return 1;
     }
 }

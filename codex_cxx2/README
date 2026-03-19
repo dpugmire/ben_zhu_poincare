@@ -8,4 +8,10 @@
   --nturns 100 \
   --direction 1 \
   --output-dir ./outputs
+
+
+.build/trace_fieldlines \
+  --divertor circ \
+  --nlines 100 150 10 --np-max 500 \
+  --output-dir ./outputs_circ_check
   

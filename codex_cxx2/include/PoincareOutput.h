@@ -35,7 +35,9 @@ public:
                                   const std::vector<Point3D>& trajectories,
                                   const std::vector<PuncturePoint>& punctures,
                                   const std::vector<std::uint8_t>* punctureValid,
-                                  const std::string& outputDir) const;
+                                  const std::string& outputDir,
+                                  bool append = false,
+                                  bool writeHeader = true) const;
 };
 
 #endif

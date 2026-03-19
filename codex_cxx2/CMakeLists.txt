@@ -5,7 +5,12 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+option(CODEX_USE_MPI "Enable MPI parallel tracing over particles" OFF)
+
 find_package(NetCDF REQUIRED)
+if (CODEX_USE_MPI)
+    find_package(MPI REQUIRED COMPONENTS CXX)
+endif()
 
 find_path(NETCDF_C_INCLUDE_DIR
     NAMES netcdf.h
@@ -48,3 +53,8 @@ target_link_libraries(trace_fieldlines
     PRIVATE
         ${NETCDF_C_LIBRARY}
         ${NetCDF_LIBRARIES})
+
+if (CODEX_USE_MPI)
+    target_compile_definitions(trace_fieldlines PRIVATE CODEX_USE_MPI=1)
+    target_link_libraries(trace_fieldlines PRIVATE MPI::MPI_CXX)
+endif()
