@@ -140,6 +140,11 @@ std::vector<ValidationResult> ValidationSuite::run(const ValidationConfig& confi
 
     std::vector<ValidationResult> results;
     results.reserve(cases.size());
+    const int maxStateCount = computeMaxStateCount(config.traceOptions);
+    LineTraceResult lineResult;
+    lineResult.states.reserve(static_cast<size_t>(std::max(0, maxStateCount)));
+    lineResult.trajectoryXYZ.reserve(static_cast<size_t>(std::max(0, maxStateCount)));
+    lineResult.punctures.reserve(static_cast<size_t>(std::max(0, config.traceOptions.npMax)));
 
     for (const ValidationCase& testCase : cases) {
         auto& slot = dataCache[testCase.divertorTag];
@@ -159,11 +164,6 @@ std::vector<ValidationResult> ValidationSuite::run(const ValidationConfig& confi
         seedInd.x = static_cast<double>(testCase.line);
         seedInd.y = static_cast<double>(slot->jyomp + 1);
         seedInd.z = slot->ziarray.empty() ? 1.0 : slot->ziarray.front();
-        LineTraceResult lineResult;
-        const int maxStateCount = computeMaxStateCount(config.traceOptions);
-        lineResult.states.reserve(static_cast<size_t>(std::max(0, maxStateCount)));
-        lineResult.trajectoryXYZ.reserve(static_cast<size_t>(std::max(0, maxStateCount)));
-        lineResult.punctures.reserve(static_cast<size_t>(std::max(0, config.traceOptions.npMax)));
         integrator.traceLine(seedInd, config.traceOptions, lineResult);
 
         output.writeLineOutputs(lineResult, config.outputDir, testCase.divertorTag);

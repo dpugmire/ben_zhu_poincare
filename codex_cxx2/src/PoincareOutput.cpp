@@ -42,27 +42,21 @@ void writeBatchLineToStreams(const PackedLineTraceBatch& batch,
                              std::ofstream& ipOut,
                              std::ofstream& tpOut,
                              std::ofstream& trajOut) {
-    const std::string lineToken = formatLineToken(batch.iline[lineIndex]);
-    const size_t stateBase = batch.stateOffset(lineIndex);
+    const std::string lineToken = formatLineToken(batch.ilinePerSeed[lineIndex]);
+    const size_t trajBase = batch.trajOffset(lineIndex);
     const size_t punctureBase = batch.punctureOffset(lineIndex);
 
-    const int trajCount = batch.trajectoryCount[lineIndex];
+    const int trajCount = batch.trajCountPerSeed[lineIndex];
     for (int i = 0; i < trajCount; ++i) {
-        const size_t idx = stateBase + static_cast<size_t>(i);
-        if (!batch.trajectorySet[idx]) {
-            continue;
-        }
-        const Point3D& p = batch.trajectoryXYZ[idx];
+        const size_t idx = trajBase + static_cast<size_t>(i);
+        const Point3D& p = batch.trajectories[idx];
         trajOut << lineToken << " " << (i + 1) << " "
                 << p.x << " " << p.y << " " << p.z << "\n";
     }
 
-    const int punctureCount = batch.punctureCount[lineIndex];
+    const int punctureCount = batch.punctureCountPerSeed[lineIndex];
     for (int i = 0; i < punctureCount; ++i) {
         const size_t idx = punctureBase + static_cast<size_t>(i);
-        if (!batch.punctureSet[idx]) {
-            continue;
-        }
         const PuncturePoint& p = batch.punctures[idx];
         ipOut << lineToken << " " << p.step << " "
               << p.xyz.x << " " << p.xyz.y << " " << p.xyz.z << "\n";
@@ -99,6 +93,39 @@ void PoincareOutput::writeLineOutputs(const LineTraceResult& line,
     trajOut << std::setprecision(16);
 
     writeLineToStreams(line, ipOut, tpOut, trajOut);
+}
+
+void PoincareOutput::writeLineOutputs(const PackedLineTraceBatch& batch,
+                                      std::size_t lineIndex,
+                                      const std::string& outputDir,
+                                      const std::string& divertorTag) const {
+    if (lineIndex >= batch.seedCount()) {
+        throw std::runtime_error("Packed line index out of range");
+    }
+
+    std::filesystem::create_directories(outputDir);
+
+    const std::string lineToken = formatLineToken(batch.ilinePerSeed[lineIndex]);
+    const std::string ipPath = outputDir + "/ip_cxx." + divertorTag + "." + lineToken + ".txt";
+    const std::string tpPath = outputDir + "/ip_cxx." + divertorTag + "." + lineToken + ".TP.txt";
+    const std::string trajPath = outputDir + "/traj_cxx." + divertorTag + "." + lineToken + ".txt";
+
+    std::ofstream ipOut(ipPath);
+    std::ofstream tpOut(tpPath);
+    std::ofstream trajOut(trajPath);
+    if (!ipOut || !tpOut || !trajOut) {
+        throw std::runtime_error("Failed to open output files for writing");
+    }
+
+    ipOut << "iline it ipx ipy ipz\n";
+    tpOut << "iline it dummy theta psi\n";
+    trajOut << "iline it x y z\n";
+
+    ipOut << std::setprecision(16);
+    tpOut << std::setprecision(16);
+    trajOut << std::setprecision(16);
+
+    writeBatchLineToStreams(batch, lineIndex, ipOut, tpOut, trajOut);
 }
 
 void PoincareOutput::writeCombinedOutputs(const std::vector<LineTraceResult>& lines,
@@ -152,7 +179,7 @@ void PoincareOutput::writeCombinedOutputs(const PackedLineTraceBatch& batch,
     tpOut << std::setprecision(16);
     trajOut << std::setprecision(16);
 
-    for (size_t i = 0; i < batch.lineCount(); ++i) {
+    for (size_t i = 0; i < batch.seedCount(); ++i) {
         writeBatchLineToStreams(batch, i, ipOut, tpOut, trajOut);
     }
 }

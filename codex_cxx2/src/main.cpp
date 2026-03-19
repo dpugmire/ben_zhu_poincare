@@ -108,47 +108,6 @@ std::vector<Point3D> buildSeedPoints(const std::vector<double>& requestedLines, 
     return seeds;
 }
 
-void packLineResult(const Point3D& seed,
-                    const LineTraceResult& line,
-                    PackedLineTraceBatch& batch,
-                    size_t lineIndex) {
-    if (lineIndex >= batch.lineCount()) {
-        throw std::runtime_error("Packed line index out of range");
-    }
-
-    batch.seeds[lineIndex] = seed;
-    batch.iline[lineIndex] = line.iline;
-    batch.endRegion[lineIndex] = line.endRegion;
-    batch.connectionLength[lineIndex] = line.connectionLength;
-
-    const size_t stateBase = batch.stateOffset(lineIndex);
-    const size_t punctureBase = batch.punctureOffset(lineIndex);
-
-    const int stateLimit = std::min(static_cast<int>(line.states.size()), batch.maxStatesPerLine);
-    batch.stateCount[lineIndex] = stateLimit;
-    for (int i = 0; i < stateLimit; ++i) {
-        const size_t idx = stateBase + static_cast<size_t>(i);
-        batch.states[idx] = line.states[static_cast<size_t>(i)];
-        batch.stateSet[idx] = true;
-    }
-
-    const int trajLimit = std::min(static_cast<int>(line.trajectoryXYZ.size()), batch.maxStatesPerLine);
-    batch.trajectoryCount[lineIndex] = trajLimit;
-    for (int i = 0; i < trajLimit; ++i) {
-        const size_t idx = stateBase + static_cast<size_t>(i);
-        batch.trajectoryXYZ[idx] = line.trajectoryXYZ[static_cast<size_t>(i)];
-        batch.trajectorySet[idx] = true;
-    }
-
-    const int punctureLimit = std::min(static_cast<int>(line.punctures.size()), batch.maxPuncturesPerLine);
-    batch.punctureCount[lineIndex] = punctureLimit;
-    for (int i = 0; i < punctureLimit; ++i) {
-        const size_t idx = punctureBase + static_cast<size_t>(i);
-        batch.punctures[idx] = line.punctures[static_cast<size_t>(i)];
-        batch.punctureSet[idx] = true;
-    }
-}
-
 void runDivertorTrace(const std::string& tag,
                       const std::string& aparPath,
                       const std::vector<double>& requestedLines,
@@ -163,26 +122,40 @@ void runDivertorTrace(const std::string& tag,
     AparFieldModel model(data);
     FieldLineIntegrator integrator(model);
     const std::vector<Point3D> seeds = buildSeedPoints(requestedLines, data);
+    if (packedLineOffset + seeds.size() > packedBatch.seedCount()) {
+        throw std::runtime_error("Packed batch is smaller than seeds.size() * maxValue requirement");
+    }
 
-    const int maxStateCount = computeMaxStateCount(config.traceOptions);
     for (size_t i = 0; i < seeds.size(); ++i) {
         const Point3D& seedInd = seeds[i];
-        LineTraceResult traced;
-        traced.states.reserve(static_cast<size_t>(std::max(0, maxStateCount)));
-        traced.trajectoryXYZ.reserve(static_cast<size_t>(std::max(0, maxStateCount)));
-        traced.punctures.reserve(static_cast<size_t>(std::max(0, config.traceOptions.npMax)));
-        integrator.traceLine(seedInd, config.traceOptions, traced);
+        const size_t seedOffset = packedLineOffset + i;
+        packedBatch.seeds[seedOffset] = seedInd;
+        integrator.traceLine(seedInd,
+                             seedOffset,
+                             config.traceOptions,
+                             packedBatch.maxStatesPerSeed,
+                             packedBatch.maxTrajPerSeed,
+                             packedBatch.maxPuncPerSeed,
+                             packedBatch.states,
+                             packedBatch.trajectories,
+                             packedBatch.punctures,
+                             packedBatch.stateCountPerSeed,
+                             packedBatch.trajCountPerSeed,
+                             packedBatch.punctureCountPerSeed,
+                             packedBatch.endRegionPerSeed,
+                             packedBatch.connectionLengthPerSeed,
+                             packedBatch.ilinePerSeed);
+        std::cout << "Traced " << tag << " line " << seedInd.x
+                  << ": traj=" << packedBatch.trajCountPerSeed[seedOffset]
+                  << ", punctures=" << packedBatch.punctureCountPerSeed[seedOffset] << "\n";
+    }
 
-        packLineResult(seedInd, traced, packedBatch, packedLineOffset + i);
-
-        const size_t trajCount = traced.trajectoryXYZ.size();
-        const size_t punctureCount = traced.punctures.size();
-        if (writePerLineOutput) {
-            output.writeLineOutputs(traced, config.outputDir, tag);
+    if (writePerLineOutput) {
+        for (size_t i = 0; i < seeds.size(); ++i) {
+            output.writeLineOutputs(packedBatch, packedLineOffset + i, config.outputDir, tag);
         }
-        std::cout << "Wrote " << tag << " line " << seedInd.x
-                  << ": traj=" << trajCount
-                  << ", punctures=" << punctureCount << "\n";
+        std::cout << "Wrote per-line outputs for " << tag
+                  << " (" << seeds.size() << " lines)\n";
     }
 }
 
@@ -348,6 +321,7 @@ int main(int argc, char** argv) {
         const size_t divertorCount = static_cast<size_t>((doSingle ? 1 : 0) + (doCirc ? 1 : 0));
         const size_t totalTraceCount = tracesPerDivertor * divertorCount;
         packedBatch.resize(totalTraceCount,
+                           computeMaxStateCount(config.traceOptions),
                            computeMaxStateCount(config.traceOptions),
                            config.traceOptions.npMax);
 

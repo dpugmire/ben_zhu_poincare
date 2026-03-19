@@ -56,59 +56,58 @@ struct TraceOptions {
 };
 
 struct PackedLineTraceBatch {
-    int maxStatesPerLine = 0;
-    int maxPuncturesPerLine = 0;
+    int maxStatesPerSeed = 0;
+    int maxTrajPerSeed = 0;
+    int maxPuncPerSeed = 0;
 
     std::vector<Point3D> seeds;
-    std::vector<double> iline;
-    std::vector<int> endRegion;
-    std::vector<double> connectionLength;
-    std::vector<int> stateCount;
-    std::vector<int> trajectoryCount;
-    std::vector<int> punctureCount;
+    std::vector<double> ilinePerSeed;
+    std::vector<int> endRegionPerSeed;
+    std::vector<double> connectionLengthPerSeed;
+    std::vector<int> stateCountPerSeed;
+    std::vector<int> trajCountPerSeed;
+    std::vector<int> punctureCountPerSeed;
 
     std::vector<TrajectoryState> states;
-    std::vector<Point3D> trajectoryXYZ;
+    std::vector<Point3D> trajectories;
     std::vector<PuncturePoint> punctures;
 
-    std::vector<bool> stateSet;
-    std::vector<bool> trajectorySet;
-    std::vector<bool> punctureSet;
-
-    size_t lineCount() const {
-        return iline.size();
+    size_t seedCount() const {
+        return ilinePerSeed.size();
     }
 
-    size_t stateOffset(size_t lineIndex) const {
-        return lineIndex * static_cast<size_t>(maxStatesPerLine);
+    size_t stateOffset(size_t seedIndex) const {
+        return seedIndex * static_cast<size_t>(maxStatesPerSeed);
     }
 
-    size_t punctureOffset(size_t lineIndex) const {
-        return lineIndex * static_cast<size_t>(maxPuncturesPerLine);
+    size_t trajOffset(size_t seedIndex) const {
+        return seedIndex * static_cast<size_t>(maxTrajPerSeed);
     }
 
-    void resize(size_t lines, int maxStates, int maxPunctures) {
-        maxStatesPerLine = (maxStates > 0) ? maxStates : 1;
-        maxPuncturesPerLine = (maxPunctures > 0) ? maxPunctures : 1;
+    size_t punctureOffset(size_t seedIndex) const {
+        return seedIndex * static_cast<size_t>(maxPuncPerSeed);
+    }
 
-        seeds.assign(lines, Point3D{});
-        iline.assign(lines, 0.0);
-        endRegion.assign(lines, 0);
-        connectionLength.assign(lines, 0.0);
-        stateCount.assign(lines, 0);
-        trajectoryCount.assign(lines, 0);
-        punctureCount.assign(lines, 0);
+    void resize(size_t seedsCount, int maxStates, int maxTraj, int maxPunc) {
+        maxStatesPerSeed = (maxStates > 0) ? maxStates : 1;
+        maxTrajPerSeed = (maxTraj > 0) ? maxTraj : 1;
+        maxPuncPerSeed = (maxPunc > 0) ? maxPunc : 1;
 
-        const size_t totalStateSlots = lines * static_cast<size_t>(maxStatesPerLine);
-        const size_t totalPunctureSlots = lines * static_cast<size_t>(maxPuncturesPerLine);
+        seeds.resize(seedsCount);
+        ilinePerSeed.resize(seedsCount, 0.0);
+        endRegionPerSeed.resize(seedsCount, 0);
+        connectionLengthPerSeed.resize(seedsCount, 0.0);
+        stateCountPerSeed.resize(seedsCount, 0);
+        trajCountPerSeed.resize(seedsCount, 0);
+        punctureCountPerSeed.resize(seedsCount, 0);
 
-        states.assign(totalStateSlots, TrajectoryState{});
-        trajectoryXYZ.assign(totalStateSlots, Point3D{});
-        punctures.assign(totalPunctureSlots, PuncturePoint{});
+        const size_t totalStateSlots = seedsCount * static_cast<size_t>(maxStatesPerSeed);
+        const size_t totalTrajSlots = seedsCount * static_cast<size_t>(maxTrajPerSeed);
+        const size_t totalPunctureSlots = seedsCount * static_cast<size_t>(maxPuncPerSeed);
 
-        stateSet.assign(totalStateSlots, false);
-        trajectorySet.assign(totalStateSlots, false);
-        punctureSet.assign(totalPunctureSlots, false);
+        states.resize(totalStateSlots);
+        trajectories.resize(totalTrajSlots);
+        punctures.resize(totalPunctureSlots);
     }
 };
 
