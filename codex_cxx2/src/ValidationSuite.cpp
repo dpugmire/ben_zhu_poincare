@@ -155,7 +155,7 @@ std::vector<ValidationResult> ValidationSuite::run(const ValidationConfig& confi
         }
 
         AparFieldModel model(*slot);
-        FieldLineIntegrator integrator(model);
+        FieldLineIntegrator integrator(model, config.traceOptions);
 
         std::cout << "Running case: divertor=" << testCase.divertorTag
                   << ", line=" << testCase.line << std::endl;
@@ -164,7 +164,7 @@ std::vector<ValidationResult> ValidationSuite::run(const ValidationConfig& confi
         seedInd.x = static_cast<double>(testCase.line);
         seedInd.y = static_cast<double>(slot->jyomp + 1);
         seedInd.z = slot->ziarray.empty() ? 1.0 : slot->ziarray.front();
-        integrator.traceLine(seedInd, config.traceOptions, lineResult);
+        integrator.traceLine(seedInd, lineResult);
 
         output.writeLineOutputs(lineResult, config.outputDir, testCase.divertorTag);
 

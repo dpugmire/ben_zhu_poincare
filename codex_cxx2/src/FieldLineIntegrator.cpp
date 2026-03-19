@@ -18,17 +18,14 @@ struct CrossingEval
 int computeMaxStateCountFromOptions(const TraceOptions& options)
 {
   constexpr int kDefaultMaxStepsPerPuncture = 200;
-  const long long derivedMaxStepsLL = static_cast<long long>(kDefaultMaxStepsPerPuncture) *
-                                      static_cast<long long>(std::max(1, options.npMax));
+  const long long derivedMaxStepsLL = static_cast<long long>(kDefaultMaxStepsPerPuncture) * static_cast<long long>(std::max(1, options.npMax));
   const int derivedMaxSteps = (derivedMaxStepsLL > static_cast<long long>(std::numeric_limits<int>::max()))
-      ? std::numeric_limits<int>::max()
-      : static_cast<int>(std::max(1LL, derivedMaxStepsLL));
+    ? std::numeric_limits<int>::max()
+    : static_cast<int>(std::max(1LL, derivedMaxStepsLL));
 
   const int maxStepsCap = (options.maxSteps > 0) ? options.maxSteps : derivedMaxSteps;
   const int nsteps = std::max(1, maxStepsCap);
-  return (nsteps >= std::numeric_limits<int>::max())
-      ? std::numeric_limits<int>::max()
-      : (nsteps + 1);
+  return (nsteps >= std::numeric_limits<int>::max()) ? std::numeric_limits<int>::max() : (nsteps + 1);
 }
 
 CrossingEval evaluateCrossing(const AparFieldModel& model,
@@ -247,16 +244,16 @@ void tryDetectPunctureOnLastSegment(const AparFieldModel& model,
 
 } // namespace
 
-FieldLineIntegrator::FieldLineIntegrator(const AparFieldModel& model)
+FieldLineIntegrator::FieldLineIntegrator(const AparFieldModel& model, const TraceOptions& options)
   : model_(model)
+  , options_(options)
+  , maxStatesPerSeed_(computeMaxStateCountFromOptions(options))
+  , maxTrajPerSeed_(maxStatesPerSeed_)
+  , maxPuncPerSeed_(std::max(1, options.npMax))
 {
 }
 
-void FieldLineIntegrator::rk4Step(const XZPoint& start,
-                                  int yStart,
-                                  int region,
-                                  int direction,
-                                  XZPoint& end) const
+void FieldLineIntegrator::rk4Step(const XZPoint& start, int yStart, int region, int direction, XZPoint& end) const
 {
   constexpr double h = 1.0;
   const double hh = 0.5 * h;
@@ -268,16 +265,13 @@ void FieldLineIntegrator::rk4Step(const XZPoint& start,
   XZDeriv k4;
 
   model_.evaluateStage(start, yStart, region, direction, 0, k1);
-  const XZPoint p1{start.x + direction * hh * k1.dxdy,
-                   start.z + direction * hh * k1.dzdy};
+  const XZPoint p1{ start.x + direction * hh * k1.dxdy, start.z + direction * hh * k1.dzdy };
 
   model_.evaluateStage(p1, yStart, region, direction, 1, k2);
-  const XZPoint p2{start.x + direction * hh * k2.dxdy,
-                   start.z + direction * hh * k2.dzdy};
+  const XZPoint p2{ start.x + direction * hh * k2.dxdy, start.z + direction * hh * k2.dzdy };
 
   model_.evaluateStage(p2, yStart, region, direction, 1, k3);
-  const XZPoint p3{start.x + direction * k3.dxdy,
-                   start.z + direction * k3.dzdy};
+  const XZPoint p3{ start.x + direction * k3.dxdy, start.z + direction * k3.dzdy };
 
   model_.evaluateStage(p3, yStart, region, direction, 2, k4);
 
@@ -286,75 +280,60 @@ void FieldLineIntegrator::rk4Step(const XZPoint& start,
 }
 
 void FieldLineIntegrator::traceLine(const Point3D& seedInd,
-                                    std::size_t seedOffset,
-                                    const TraceOptions& options,
-                                    int maxStatesPerSeed,
-                                    int maxTrajPerSeed,
-                                    int maxPuncPerSeed,
+                                    std::size_t seedIndex,
                                     std::vector<TrajectoryState>& states,
                                     std::vector<Point3D>& trajectories,
                                     std::vector<PuncturePoint>& punctures,
-                                    std::vector<int>& stateCountPerSeed,
-                                    std::vector<int>& trajCountPerSeed,
-                                    std::vector<int>& punctureCountPerSeed,
-                                    std::vector<int>& endRegionPerSeed,
-                                    std::vector<double>& connectionLengthPerSeed,
-                                    std::vector<double>& ilinePerSeed) const
+                                    int& stateCount,
+                                    int& trajCount,
+                                    int& punctureCount,
+                                    int& endRegion,
+                                    double& connectionLength,
+                                    double& iline) const
 {
-  if (seedOffset >= ilinePerSeed.size() ||
-      seedOffset >= endRegionPerSeed.size() ||
-      seedOffset >= connectionLengthPerSeed.size() ||
-      seedOffset >= stateCountPerSeed.size() ||
-      seedOffset >= trajCountPerSeed.size() ||
-      seedOffset >= punctureCountPerSeed.size())
-  {
-    throw std::runtime_error("seedOffset out of range for per-seed arrays");
-  }
+  const std::size_t stateBase = seedIndex * static_cast<std::size_t>(maxStatesPerSeed_);
+  const std::size_t trajBase = seedIndex * static_cast<std::size_t>(maxTrajPerSeed_);
+  const std::size_t punctureBase = seedIndex * static_cast<std::size_t>(maxPuncPerSeed_);
 
-  const std::size_t stateBase = seedOffset * static_cast<std::size_t>(std::max(0, maxStatesPerSeed));
-  const std::size_t trajBase = seedOffset * static_cast<std::size_t>(std::max(0, maxTrajPerSeed));
-  const std::size_t punctureBase = seedOffset * static_cast<std::size_t>(std::max(0, maxPuncPerSeed));
-
-  if (maxStatesPerSeed <= 0 || maxTrajPerSeed <= 0 || maxPuncPerSeed <= 0)
+  if (maxStatesPerSeed_ <= 0 || maxTrajPerSeed_ <= 0 || maxPuncPerSeed_ <= 0)
   {
-    ilinePerSeed[seedOffset] = seedInd.x;
-    endRegionPerSeed[seedOffset] = 98;
-    connectionLengthPerSeed[seedOffset] = 0.0;
-    stateCountPerSeed[seedOffset] = 0;
-    trajCountPerSeed[seedOffset] = 0;
-    punctureCountPerSeed[seedOffset] = 0;
+    iline = seedInd.x;
+    endRegion = 98;
+    connectionLength = 0.0;
+    stateCount = 0;
+    trajCount = 0;
+    punctureCount = 0;
     return;
   }
 
-  if (stateBase + static_cast<std::size_t>(maxStatesPerSeed) > states.size() ||
-      trajBase + static_cast<std::size_t>(maxTrajPerSeed) > trajectories.size() ||
-      punctureBase + static_cast<std::size_t>(maxPuncPerSeed) > punctures.size())
+  if (stateBase + static_cast<std::size_t>(maxStatesPerSeed_) > states.size() ||
+      trajBase + static_cast<std::size_t>(maxTrajPerSeed_) > trajectories.size() ||
+      punctureBase + static_cast<std::size_t>(maxPuncPerSeed_) > punctures.size())
   {
     throw std::runtime_error("traceLine output arrays are smaller than seeds.size() * maxValue");
   }
 
   const AparData& d = model_.data();
 
-  ilinePerSeed[seedOffset] = seedInd.x;
-  endRegionPerSeed[seedOffset] = 0;
-  connectionLengthPerSeed[seedOffset] = 0.0;
-  stateCountPerSeed[seedOffset] = 0;
-  trajCountPerSeed[seedOffset] = 0;
-  punctureCountPerSeed[seedOffset] = 0;
+  iline = seedInd.x;
+  endRegion = 0;
+  connectionLength = 0.0;
+  stateCount = 0;
+  trajCount = 0;
+  punctureCount = 0;
 
   const double xindSeed = seedInd.x;
   if (xindSeed < 1.0 || xindSeed > static_cast<double>(d.nx))
   {
-    endRegionPerSeed[seedOffset] = 99;
+    endRegion = 99;
     return;
   }
 
-  const int maxStateCountFromOptions = computeMaxStateCountFromOptions(options);
-  const int maxStateCount = std::min(std::min(maxStateCountFromOptions, maxStatesPerSeed), maxTrajPerSeed);
-  const int maxPunctureCount = std::min(std::max(0, options.npMax), maxPuncPerSeed);
+  const int maxStateCount = std::min(maxStatesPerSeed_, maxTrajPerSeed_);
+  const int maxPunctureCount = std::min(std::max(0, options_.npMax), maxPuncPerSeed_);
   if (maxStateCount <= 0)
   {
-    endRegionPerSeed[seedOffset] = 98;
+    endRegion = 98;
     return;
   }
 
@@ -383,9 +362,9 @@ void FieldLineIntegrator::traceLine(const Point3D& seedInd,
     }
   }
 
-  int stateCount = 0;
-  int trajCount = 0;
-  int punctureCount = 0;
+  int localStateCount = 0;
+  int localTrajCount = 0;
+  int localPunctureCount = 0;
 
   TrajectoryState initial;
   initial.turn = 1;
@@ -396,19 +375,19 @@ void FieldLineIntegrator::traceLine(const Point3D& seedInd,
   initial.segmentLength = 0.0;
   initial.rawZ = current.z;
 
-  states[stateBase + static_cast<std::size_t>(stateCount)] = initial;
-  trajectories[trajBase + static_cast<std::size_t>(trajCount)] = model_.reconstructTrajectoryXYZ(initial);
-  ++stateCount;
-  ++trajCount;
+  states[stateBase + static_cast<std::size_t>(localStateCount)] = initial;
+  trajectories[trajBase + static_cast<std::size_t>(localTrajCount)] = model_.reconstructTrajectoryXYZ(initial);
+  ++localStateCount;
+  ++localTrajCount;
 
   double lastFitRoot = -1.0e30;
 
   int iturn = 1;
-  while (region < 10 && stateCount < maxStateCount)
+  while (region < 10 && localStateCount < maxStateCount)
   {
     for (int iy = 0; iy < d.ny - 1; ++iy)
     {
-      if (region >= 10 || stateCount >= maxStateCount)
+      if (region >= 10 || localStateCount >= maxStateCount)
       {
         break;
       }
@@ -418,10 +397,10 @@ void FieldLineIntegrator::traceLine(const Point3D& seedInd,
 
       if (region == 0 && yStart > d.nypf1 && yStart < d.nypf2 + 1)
       {
-        rk4Step(current, yStart, region, options.direction, next);
+        rk4Step(current, yStart, region, options_.direction, next);
         const double rawZEnd = next.z;
 
-        yEnd = (options.direction == 1) ? (yStart + 1) : (yStart - 1);
+        yEnd = (options_.direction == 1) ? (yStart + 1) : (yStart - 1);
 
         if (next.x > d.xMax)
         {
@@ -440,13 +419,13 @@ void FieldLineIntegrator::traceLine(const Point3D& seedInd,
           }
         }
 
-        if (options.direction == 1 && yStart == d.nypf2 && region == 0)
+        if (options_.direction == 1 && yStart == d.nypf2 && region == 0)
         {
           const double shift = model_.interp1(d.xiarray, d.shiftAngle, xind);
           next.z += shift;
           yEnd = d.nypf1 + 1;
         }
-        if (options.direction == -1 && yStart == (d.nypf1 + 1) && region == 0)
+        if (options_.direction == -1 && yStart == (d.nypf1 + 1) && region == 0)
         {
           const double shift = model_.interp1(d.xiarray, d.shiftAngle, xind);
           next.z -= shift;
@@ -465,10 +444,10 @@ void FieldLineIntegrator::traceLine(const Point3D& seedInd,
         step.segmentLength = 0.0;
         step.rawZ = rawZEnd;
 
-        states[stateBase + static_cast<std::size_t>(stateCount)] = step;
-        trajectories[trajBase + static_cast<std::size_t>(trajCount)] = model_.reconstructTrajectoryXYZ(step);
-        ++stateCount;
-        ++trajCount;
+        states[stateBase + static_cast<std::size_t>(localStateCount)] = step;
+        trajectories[trajBase + static_cast<std::size_t>(localTrajCount)] = model_.reconstructTrajectoryXYZ(step);
+        ++localStateCount;
+        ++localTrajCount;
 
         if (maxPunctureCount > 0)
         {
@@ -477,12 +456,12 @@ void FieldLineIntegrator::traceLine(const Point3D& seedInd,
                                          trajectories,
                                          stateBase,
                                          trajBase,
-                                         stateCount,
-                                         options.direction,
+                                         localStateCount,
+                                         options_.direction,
                                          maxPunctureCount,
                                          punctures,
                                          punctureBase,
-                                         punctureCount,
+                                         localPunctureCount,
                                          lastFitRoot);
         }
 
@@ -491,16 +470,16 @@ void FieldLineIntegrator::traceLine(const Point3D& seedInd,
       }
       else if (region == 1 || region == 2)
       {
-        rk4Step(current, yStart, region, options.direction, next);
+        rk4Step(current, yStart, region, options_.direction, next);
         const double rawZEnd = next.z;
 
-        yEnd = (options.direction == 1) ? (yStart + 1) : (yStart - 1);
+        yEnd = (options_.direction == 1) ? (yStart + 1) : (yStart - 1);
 
-        if (options.direction == 1 && yStart == d.nypf1 && region == 2)
+        if (options_.direction == 1 && yStart == d.nypf1 && region == 2)
         {
           yEnd = d.nypf2 + 1;
         }
-        else if (options.direction == -1 && yStart == d.nypf2 + 1 && region == 2)
+        else if (options_.direction == -1 && yStart == d.nypf2 + 1 && region == 2)
         {
           yEnd = d.nypf1;
         }
@@ -526,11 +505,11 @@ void FieldLineIntegrator::traceLine(const Point3D& seedInd,
           }
         }
 
-        if (options.direction == 1 && yEnd == d.ny)
+        if (options_.direction == 1 && yEnd == d.ny)
         {
           region = 14;
         }
-        else if (options.direction == -1 && yEnd == 1)
+        else if (options_.direction == -1 && yEnd == 1)
         {
           region = 13;
         }
@@ -547,10 +526,10 @@ void FieldLineIntegrator::traceLine(const Point3D& seedInd,
         step.segmentLength = 0.0;
         step.rawZ = rawZEnd;
 
-        states[stateBase + static_cast<std::size_t>(stateCount)] = step;
-        trajectories[trajBase + static_cast<std::size_t>(trajCount)] = model_.reconstructTrajectoryXYZ(step);
-        ++stateCount;
-        ++trajCount;
+        states[stateBase + static_cast<std::size_t>(localStateCount)] = step;
+        trajectories[trajBase + static_cast<std::size_t>(localTrajCount)] = model_.reconstructTrajectoryXYZ(step);
+        ++localStateCount;
+        ++localTrajCount;
 
         if (maxPunctureCount > 0)
         {
@@ -559,12 +538,12 @@ void FieldLineIntegrator::traceLine(const Point3D& seedInd,
                                          trajectories,
                                          stateBase,
                                          trajBase,
-                                         stateCount,
-                                         options.direction,
+                                         localStateCount,
+                                         options_.direction,
                                          maxPunctureCount,
                                          punctures,
                                          punctureBase,
-                                         punctureCount,
+                                         localPunctureCount,
                                          lastFitRoot);
         }
 
@@ -581,7 +560,7 @@ void FieldLineIntegrator::traceLine(const Point3D& seedInd,
   }
 
   double length = 0.0;
-  for (int i = 1; i < trajCount; ++i)
+  for (int i = 1; i < localTrajCount; ++i)
   {
     const Point3D& p1 = trajectories[trajBase + static_cast<std::size_t>(i - 1)];
     const Point3D& p2 = trajectories[trajBase + static_cast<std::size_t>(i)];
@@ -591,55 +570,47 @@ void FieldLineIntegrator::traceLine(const Point3D& seedInd,
     length += std::sqrt(dx * dx + dy * dy + dz * dz);
   }
 
-  endRegionPerSeed[seedOffset] = region;
-  connectionLengthPerSeed[seedOffset] = length;
-  stateCountPerSeed[seedOffset] = stateCount;
-  trajCountPerSeed[seedOffset] = trajCount;
-  punctureCountPerSeed[seedOffset] = punctureCount;
+  endRegion = region;
+  connectionLength = length;
+  stateCount = localStateCount;
+  trajCount = localTrajCount;
+  punctureCount = localPunctureCount;
 }
 
-void FieldLineIntegrator::traceLine(const Point3D& seedInd, const TraceOptions& options, LineTraceResult& out) const
+void FieldLineIntegrator::traceLine(const Point3D& seedInd, LineTraceResult& out) const
 {
-  const int maxStatesPerSeed = computeMaxStateCountFromOptions(options);
-  const int maxTrajPerSeed = maxStatesPerSeed;
-  const int maxPuncPerSeed = std::max(1, options.npMax);
+  std::vector<TrajectoryState> states(static_cast<std::size_t>(maxStatesPerSeed_));
+  std::vector<Point3D> trajectories(static_cast<std::size_t>(maxTrajPerSeed_));
+  std::vector<PuncturePoint> punctures(static_cast<std::size_t>(maxPuncPerSeed_));
 
-  std::vector<TrajectoryState> states(static_cast<std::size_t>(maxStatesPerSeed));
-  std::vector<Point3D> trajectories(static_cast<std::size_t>(maxTrajPerSeed));
-  std::vector<PuncturePoint> punctures(static_cast<std::size_t>(maxPuncPerSeed));
-
-  std::vector<int> stateCountPerSeed(1, 0);
-  std::vector<int> trajCountPerSeed(1, 0);
-  std::vector<int> punctureCountPerSeed(1, 0);
-  std::vector<int> endRegionPerSeed(1, 0);
-  std::vector<double> connectionLengthPerSeed(1, 0.0);
-  std::vector<double> ilinePerSeed(1, 0.0);
+  int stateCount = 0;
+  int trajCount = 0;
+  int punctureCount = 0;
+  int endRegion = 0;
+  double connectionLength = 0.0;
+  double iline = 0.0;
 
   traceLine(seedInd,
             0,
-            options,
-            maxStatesPerSeed,
-            maxTrajPerSeed,
-            maxPuncPerSeed,
             states,
             trajectories,
             punctures,
-            stateCountPerSeed,
-            trajCountPerSeed,
-            punctureCountPerSeed,
-            endRegionPerSeed,
-            connectionLengthPerSeed,
-            ilinePerSeed);
+            stateCount,
+            trajCount,
+            punctureCount,
+            endRegion,
+            connectionLength,
+            iline);
 
-  out.iline = ilinePerSeed[0];
-  out.endRegion = endRegionPerSeed[0];
-  out.connectionLength = connectionLengthPerSeed[0];
+  out.iline = iline;
+  out.endRegion = endRegion;
+  out.connectionLength = connectionLength;
 
-  const int stateCount = std::max(0, std::min(stateCountPerSeed[0], maxStatesPerSeed));
-  const int trajCount = std::max(0, std::min(trajCountPerSeed[0], maxTrajPerSeed));
-  const int punctureCount = std::max(0, std::min(punctureCountPerSeed[0], maxPuncPerSeed));
+  const int clampedStateCount = std::max(0, std::min(stateCount, maxStatesPerSeed_));
+  const int clampedTrajCount = std::max(0, std::min(trajCount, maxTrajPerSeed_));
+  const int clampedPunctureCount = std::max(0, std::min(punctureCount, maxPuncPerSeed_));
 
-  out.states.assign(states.begin(), states.begin() + stateCount);
-  out.trajectoryXYZ.assign(trajectories.begin(), trajectories.begin() + trajCount);
-  out.punctures.assign(punctures.begin(), punctures.begin() + punctureCount);
+  out.states.assign(states.begin(), states.begin() + clampedStateCount);
+  out.trajectoryXYZ.assign(trajectories.begin(), trajectories.begin() + clampedTrajCount);
+  out.punctures.assign(punctures.begin(), punctures.begin() + clampedPunctureCount);
 }

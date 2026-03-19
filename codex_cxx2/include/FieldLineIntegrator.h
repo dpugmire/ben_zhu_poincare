@@ -7,28 +7,43 @@
 class FieldLineIntegrator
 {
 public:
-  explicit FieldLineIntegrator(const AparFieldModel& model);
+  FieldLineIntegrator(const AparFieldModel& model, const TraceOptions& options);
+
+  int maxStatesPerSeed() const
+  {
+    return maxStatesPerSeed_;
+  }
+
+  int maxTrajPerSeed() const
+  {
+    return maxTrajPerSeed_;
+  }
+
+  int maxPuncPerSeed() const
+  {
+    return maxPuncPerSeed_;
+  }
 
   void traceLine(const Point3D& seedInd,
-                 std::size_t seedOffset,
-                 const TraceOptions& options,
-                 int maxStatesPerSeed,
-                 int maxTrajPerSeed,
-                 int maxPuncPerSeed,
+                 std::size_t seedIndex,
                  std::vector<TrajectoryState>& states,
                  std::vector<Point3D>& trajectories,
                  std::vector<PuncturePoint>& punctures,
-                 std::vector<int>& stateCountPerSeed,
-                 std::vector<int>& trajCountPerSeed,
-                 std::vector<int>& punctureCountPerSeed,
-                 std::vector<int>& endRegionPerSeed,
-                 std::vector<double>& connectionLengthPerSeed,
-                 std::vector<double>& ilinePerSeed) const;
+                 int& stateCount,
+                 int& trajCount,
+                 int& punctureCount,
+                 int& endRegion,
+                 double& connectionLength,
+                 double& iline) const;
 
-  void traceLine(const Point3D& seedInd, const TraceOptions& options, LineTraceResult& out) const;
+  void traceLine(const Point3D& seedInd, LineTraceResult& out) const;
 
 private:
   const AparFieldModel& model_;
+  TraceOptions options_;
+  int maxStatesPerSeed_ = 1;
+  int maxTrajPerSeed_ = 1;
+  int maxPuncPerSeed_ = 1;
 
   void rk4Step(const XZPoint& start,
                int yStart,

@@ -1,5 +1,6 @@
 #include "PoincareOutput.h"
 
+#include <algorithm>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
@@ -37,27 +38,43 @@ void writeLineToStreams(const LineTraceResult& line,
     }
 }
 
-void writeBatchLineToStreams(const PackedLineTraceBatch& batch,
-                             size_t lineIndex,
-                             std::ofstream& ipOut,
-                             std::ofstream& tpOut,
-                             std::ofstream& trajOut) {
-    const std::string lineToken = formatLineToken(batch.ilinePerSeed[lineIndex]);
-    const size_t trajBase = batch.trajOffset(lineIndex);
-    const size_t punctureBase = batch.punctureOffset(lineIndex);
+void writeFlatLineToStreams(double iline,
+                            std::size_t seedIndex,
+                            int maxTrajPerSeed,
+                            int maxPuncPerSeed,
+                            int trajCount,
+                            int punctureCount,
+                            const std::vector<Point3D>& trajectories,
+                            const std::vector<PuncturePoint>& punctures,
+                            std::ofstream& ipOut,
+                            std::ofstream& tpOut,
+                            std::ofstream& trajOut) {
+    if (maxTrajPerSeed <= 0 || maxPuncPerSeed <= 0) {
+        return;
+    }
 
-    const int trajCount = batch.trajCountPerSeed[lineIndex];
-    for (int i = 0; i < trajCount; ++i) {
-        const size_t idx = trajBase + static_cast<size_t>(i);
-        const Point3D& p = batch.trajectories[idx];
+    const std::size_t trajBase = seedIndex * static_cast<std::size_t>(maxTrajPerSeed);
+    const std::size_t punctureBase = seedIndex * static_cast<std::size_t>(maxPuncPerSeed);
+    const std::string lineToken = formatLineToken(iline);
+
+    const int clampedTrajCount = std::max(0, std::min(trajCount, maxTrajPerSeed));
+    const int clampedPunctureCount = std::max(0, std::min(punctureCount, maxPuncPerSeed));
+
+    if (trajBase + static_cast<std::size_t>(clampedTrajCount) > trajectories.size() ||
+        punctureBase + static_cast<std::size_t>(clampedPunctureCount) > punctures.size()) {
+        throw std::runtime_error("Output arrays are smaller than numSeeds * maxXPerSeed");
+    }
+
+    for (int i = 0; i < clampedTrajCount; ++i) {
+        const std::size_t idx = trajBase + static_cast<std::size_t>(i);
+        const Point3D& p = trajectories[idx];
         trajOut << lineToken << " " << (i + 1) << " "
                 << p.x << " " << p.y << " " << p.z << "\n";
     }
 
-    const int punctureCount = batch.punctureCountPerSeed[lineIndex];
-    for (int i = 0; i < punctureCount; ++i) {
-        const size_t idx = punctureBase + static_cast<size_t>(i);
-        const PuncturePoint& p = batch.punctures[idx];
+    for (int i = 0; i < clampedPunctureCount; ++i) {
+        const std::size_t idx = punctureBase + static_cast<std::size_t>(i);
+        const PuncturePoint& p = punctures[idx];
         ipOut << lineToken << " " << p.step << " "
               << p.xyz.x << " " << p.xyz.y << " " << p.xyz.z << "\n";
         tpOut << lineToken << " " << p.step << " "
@@ -95,17 +112,19 @@ void PoincareOutput::writeLineOutputs(const LineTraceResult& line,
     writeLineToStreams(line, ipOut, tpOut, trajOut);
 }
 
-void PoincareOutput::writeLineOutputs(const PackedLineTraceBatch& batch,
-                                      std::size_t lineIndex,
-                                      const std::string& outputDir,
-                                      const std::string& divertorTag) const {
-    if (lineIndex >= batch.seedCount()) {
-        throw std::runtime_error("Packed line index out of range");
-    }
-
+void PoincareOutput::writeLineOutputsFlat(double iline,
+                                          std::size_t seedIndex,
+                                          int maxTrajPerSeed,
+                                          int maxPuncPerSeed,
+                                          int trajCount,
+                                          int punctureCount,
+                                          const std::vector<Point3D>& trajectories,
+                                          const std::vector<PuncturePoint>& punctures,
+                                          const std::string& outputDir,
+                                          const std::string& divertorTag) const {
     std::filesystem::create_directories(outputDir);
 
-    const std::string lineToken = formatLineToken(batch.ilinePerSeed[lineIndex]);
+    const std::string lineToken = formatLineToken(iline);
     const std::string ipPath = outputDir + "/ip_cxx." + divertorTag + "." + lineToken + ".txt";
     const std::string tpPath = outputDir + "/ip_cxx." + divertorTag + "." + lineToken + ".TP.txt";
     const std::string trajPath = outputDir + "/traj_cxx." + divertorTag + "." + lineToken + ".txt";
@@ -125,7 +144,17 @@ void PoincareOutput::writeLineOutputs(const PackedLineTraceBatch& batch,
     tpOut << std::setprecision(16);
     trajOut << std::setprecision(16);
 
-    writeBatchLineToStreams(batch, lineIndex, ipOut, tpOut, trajOut);
+    writeFlatLineToStreams(iline,
+                           seedIndex,
+                           maxTrajPerSeed,
+                           maxPuncPerSeed,
+                           trajCount,
+                           punctureCount,
+                           trajectories,
+                           punctures,
+                           ipOut,
+                           tpOut,
+                           trajOut);
 }
 
 void PoincareOutput::writeCombinedOutputs(const std::vector<LineTraceResult>& lines,
@@ -156,8 +185,18 @@ void PoincareOutput::writeCombinedOutputs(const std::vector<LineTraceResult>& li
     }
 }
 
-void PoincareOutput::writeCombinedOutputs(const PackedLineTraceBatch& batch,
-                                          const std::string& outputDir) const {
+void PoincareOutput::writeCombinedOutputsFlat(const std::vector<double>& ilinePerSeed,
+                                              const std::vector<int>& trajCountPerSeed,
+                                              const std::vector<int>& punctureCountPerSeed,
+                                              int maxTrajPerSeed,
+                                              int maxPuncPerSeed,
+                                              const std::vector<Point3D>& trajectories,
+                                              const std::vector<PuncturePoint>& punctures,
+                                              const std::string& outputDir) const {
+    if (ilinePerSeed.size() != trajCountPerSeed.size() || ilinePerSeed.size() != punctureCountPerSeed.size()) {
+        throw std::runtime_error("Per-seed metadata arrays must all have the same size");
+    }
+
     std::filesystem::create_directories(outputDir);
 
     const std::string ipPath = outputDir + "/ip_cxx.txt";
@@ -179,7 +218,17 @@ void PoincareOutput::writeCombinedOutputs(const PackedLineTraceBatch& batch,
     tpOut << std::setprecision(16);
     trajOut << std::setprecision(16);
 
-    for (size_t i = 0; i < batch.seedCount(); ++i) {
-        writeBatchLineToStreams(batch, i, ipOut, tpOut, trajOut);
+    for (std::size_t i = 0; i < ilinePerSeed.size(); ++i) {
+        writeFlatLineToStreams(ilinePerSeed[i],
+                               i,
+                               maxTrajPerSeed,
+                               maxPuncPerSeed,
+                               trajCountPerSeed[i],
+                               punctureCountPerSeed[i],
+                               trajectories,
+                               punctures,
+                               ipOut,
+                               tpOut,
+                               trajOut);
     }
 }

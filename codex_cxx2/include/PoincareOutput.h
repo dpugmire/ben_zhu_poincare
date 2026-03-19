@@ -12,16 +12,28 @@ public:
                           const std::string& outputDir,
                           const std::string& divertorTag) const;
 
-    void writeLineOutputs(const PackedLineTraceBatch& batch,
-                          std::size_t lineIndex,
-                          const std::string& outputDir,
-                          const std::string& divertorTag) const;
+    void writeLineOutputsFlat(double iline,
+                              std::size_t seedIndex,
+                              int maxTrajPerSeed,
+                              int maxPuncPerSeed,
+                              int trajCount,
+                              int punctureCount,
+                              const std::vector<Point3D>& trajectories,
+                              const std::vector<PuncturePoint>& punctures,
+                              const std::string& outputDir,
+                              const std::string& divertorTag) const;
 
     void writeCombinedOutputs(const std::vector<LineTraceResult>& lines,
                               const std::string& outputDir) const;
 
-    void writeCombinedOutputs(const PackedLineTraceBatch& batch,
-                              const std::string& outputDir) const;
+    void writeCombinedOutputsFlat(const std::vector<double>& ilinePerSeed,
+                                  const std::vector<int>& trajCountPerSeed,
+                                  const std::vector<int>& punctureCountPerSeed,
+                                  int maxTrajPerSeed,
+                                  int maxPuncPerSeed,
+                                  const std::vector<Point3D>& trajectories,
+                                  const std::vector<PuncturePoint>& punctures,
+                                  const std::string& outputDir) const;
 };
 
 #endif
