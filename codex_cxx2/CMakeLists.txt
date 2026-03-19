@@ -6,10 +6,14 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 option(CODEX_USE_MPI "Enable MPI parallel tracing over particles" OFF)
+option(CODEX_USE_VISKORES "Enable Viskores runtime integration" OFF)
 
 find_package(NetCDF REQUIRED)
 if (CODEX_USE_MPI)
     find_package(MPI REQUIRED COMPONENTS CXX)
+endif()
+if (CODEX_USE_VISKORES)
+    find_package(Viskores REQUIRED CONFIG)
 endif()
 
 find_path(NETCDF_C_INCLUDE_DIR
@@ -57,4 +61,9 @@ target_link_libraries(trace_fieldlines
 if (CODEX_USE_MPI)
     target_compile_definitions(trace_fieldlines PRIVATE CODEX_USE_MPI=1)
     target_link_libraries(trace_fieldlines PRIVATE MPI::MPI_CXX)
+endif()
+
+if (CODEX_USE_VISKORES)
+    target_compile_definitions(trace_fieldlines PRIVATE CODEX_USE_VISKORES=1)
+    target_link_libraries(trace_fieldlines PRIVATE viskores::cont)
 endif()

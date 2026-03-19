@@ -14,4 +14,18 @@
   --divertor circ \
   --nlines 100 150 10 --np-max 500 \
   --output-dir ./outputs_circ_check
+
+
+MPI and viskores version.
+
+FI_PROVIDER=tcp mpirun -np 2 ./build/trace_fieldlines \
+  --divertor single \
+  --single-apar /Users/dpn/proj/bout++/ben_zhu_poincare/apar.single.nc \
+  --nlines 150.5 151.5 5 \
+  --np-max 100 \
+  --direction 1 \
+  --viskores-device serial \
+  --output-dir ./outputs
+
+
   
