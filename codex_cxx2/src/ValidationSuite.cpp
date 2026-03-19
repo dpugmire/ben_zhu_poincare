@@ -164,7 +164,11 @@ std::vector<ValidationResult> ValidationSuite::run(const ValidationConfig& confi
         seedInd.x = static_cast<double>(testCase.line);
         seedInd.y = static_cast<double>(slot->jyomp + 1);
         seedInd.z = slot->ziarray.empty() ? 1.0 : slot->ziarray.front();
-        integrator.traceLine(seedInd, lineResult);
+        const TraceStatus traceStatus = integrator.traceLine(seedInd, lineResult);
+        if (traceStatus != TraceStatus::Ok && traceStatus != TraceStatus::MaxStepLimitReached) {
+            throw std::runtime_error("traceLine failed in validation with status " +
+                                     std::string(traceStatusName(traceStatus)));
+        }
 
         output.writeLineOutputs(lineResult, config.outputDir, testCase.divertorTag);
 

@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <cstdlib>
 #include <iostream>
 #include <sstream>
@@ -92,6 +93,10 @@ enum class LineSpecMode {
     range
 };
 
+bool isFatalTraceStatus(TraceStatus status) {
+    return status == TraceStatus::InvalidConfiguration || status == TraceStatus::OutputTooSmall;
+}
+
 std::vector<Point3D> buildSeedPoints(const std::vector<double>& requestedLines, const AparData& data) {
     std::vector<Point3D> seeds;
     seeds.reserve(requestedLines.size());
@@ -124,6 +129,7 @@ void runDivertorTrace(const std::string& tag,
                       std::vector<TrajectoryState>& states,
                       std::vector<Point3D>& trajectories,
                       std::vector<PuncturePoint>& punctures,
+                      std::vector<std::uint8_t>& punctureValid,
                       int maxStatesPerSeed,
                       int maxTrajPerSeed,
                       int maxPuncPerSeed,
@@ -142,25 +148,32 @@ void runDivertorTrace(const std::string& tag,
     if (seedIndexOffset + seeds.size() > ilinePerSeed.size()) {
         throw std::runtime_error("Per-seed output arrays are smaller than number of seeds");
     }
+    TraceOutputViews outputViews = makeTraceOutputViews(states, trajectories, punctures, &punctureValid);
 
     for (size_t i = 0; i < seeds.size(); ++i) {
         const Point3D& seedInd = seeds[i];
         const size_t seedIndex = seedIndexOffset + i;
         seedsAll[seedIndex] = seedInd;
-        integrator.traceLine(seedInd,
-                             seedIndex,
-                             states,
-                             trajectories,
-                             punctures,
-                             stateCountPerSeed[seedIndex],
-                             trajCountPerSeed[seedIndex],
-                             punctureCountPerSeed[seedIndex],
-                             endRegionPerSeed[seedIndex],
-                             connectionLengthPerSeed[seedIndex],
-                             ilinePerSeed[seedIndex]);
+        const TraceStatus traceStatus = integrator.traceLine(seedInd,
+                                                             seedIndex,
+                                                             outputViews,
+                                                             stateCountPerSeed[seedIndex],
+                                                             trajCountPerSeed[seedIndex],
+                                                             punctureCountPerSeed[seedIndex],
+                                                             endRegionPerSeed[seedIndex],
+                                                             connectionLengthPerSeed[seedIndex],
+                                                             ilinePerSeed[seedIndex]);
+        if (isFatalTraceStatus(traceStatus)) {
+            throw std::runtime_error("traceLine failed for seed " + std::to_string(seedIndex) +
+                                     " with status " + traceStatusName(traceStatus));
+        }
         std::cout << "Traced " << tag << " line " << seedInd.x
                   << ": traj=" << trajCountPerSeed[seedIndex]
-                  << ", punctures=" << punctureCountPerSeed[seedIndex] << "\n";
+                  << ", punctures=" << punctureCountPerSeed[seedIndex];
+        if (traceStatus != TraceStatus::Ok) {
+            std::cout << ", status=" << traceStatusName(traceStatus);
+        }
+        std::cout << "\n";
     }
 
     if (writePerLineOutput) {
@@ -174,6 +187,7 @@ void runDivertorTrace(const std::string& tag,
                                         punctureCountPerSeed[seedIndex],
                                         trajectories,
                                         punctures,
+                                        &punctureValid,
                                         config.outputDir,
                                         tag);
         }
@@ -356,6 +370,7 @@ int main(int argc, char** argv) {
         std::vector<TrajectoryState> states(totalTraceCount * static_cast<size_t>(maxStatesPerSeed));
         std::vector<Point3D> trajectories(totalTraceCount * static_cast<size_t>(maxTrajPerSeed));
         std::vector<PuncturePoint> punctures(totalTraceCount * static_cast<size_t>(maxPuncPerSeed));
+        std::vector<std::uint8_t> punctureValid(totalTraceCount * static_cast<size_t>(maxPuncPerSeed), static_cast<std::uint8_t>(0));
 
         size_t seedIndexOffset = 0;
 
@@ -376,6 +391,7 @@ int main(int argc, char** argv) {
                              states,
                              trajectories,
                              punctures,
+                             punctureValid,
                              maxStatesPerSeed,
                              maxTrajPerSeed,
                              maxPuncPerSeed,
@@ -399,6 +415,7 @@ int main(int argc, char** argv) {
                              states,
                              trajectories,
                              punctures,
+                             punctureValid,
                              maxStatesPerSeed,
                              maxTrajPerSeed,
                              maxPuncPerSeed,
@@ -414,6 +431,7 @@ int main(int argc, char** argv) {
                                             maxPuncPerSeed,
                                             trajectories,
                                             punctures,
+                                            &punctureValid,
                                             config.outputDir);
             std::cout << "Wrote combined outputs: " << config.outputDir
                       << "/ip_cxx.txt, " << config.outputDir << "/ip_cxx.TP.txt"

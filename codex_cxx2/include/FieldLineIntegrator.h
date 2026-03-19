@@ -24,19 +24,17 @@ public:
     return maxPuncPerSeed_;
   }
 
-  void traceLine(const Point3D& seedInd,
-                 std::size_t seedIndex,
-                 std::vector<TrajectoryState>& states,
-                 std::vector<Point3D>& trajectories,
-                 std::vector<PuncturePoint>& punctures,
-                 int& stateCount,
-                 int& trajCount,
-                 int& punctureCount,
-                 int& endRegion,
-                 double& connectionLength,
-                 double& iline) const;
+  TraceStatus traceLine(const Point3D& seedInd,
+                        std::size_t seedIndex,
+                        const TraceOutputViews& outputs,
+                        int& stateCount,
+                        int& trajCount,
+                        int& punctureCount,
+                        int& endRegion,
+                        double& connectionLength,
+                        double& iline) const;
 
-  void traceLine(const Point3D& seedInd, LineTraceResult& out) const;
+  TraceStatus traceLine(const Point3D& seedInd, LineTraceResult& out) const;
 
 private:
   const AparFieldModel& model_;

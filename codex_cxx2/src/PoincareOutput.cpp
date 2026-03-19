@@ -46,6 +46,7 @@ void writeFlatLineToStreams(double iline,
                             int punctureCount,
                             const std::vector<Point3D>& trajectories,
                             const std::vector<PuncturePoint>& punctures,
+                            const std::vector<std::uint8_t>* punctureValid,
                             std::ofstream& ipOut,
                             std::ofstream& tpOut,
                             std::ofstream& trajOut) {
@@ -64,6 +65,10 @@ void writeFlatLineToStreams(double iline,
         punctureBase + static_cast<std::size_t>(clampedPunctureCount) > punctures.size()) {
         throw std::runtime_error("Output arrays are smaller than numSeeds * maxXPerSeed");
     }
+    if (punctureValid != nullptr &&
+        punctureBase + static_cast<std::size_t>(clampedPunctureCount) > punctureValid->size()) {
+        throw std::runtime_error("Puncture valid-mask array is smaller than numSeeds * maxPuncPerSeed");
+    }
 
     for (int i = 0; i < clampedTrajCount; ++i) {
         const std::size_t idx = trajBase + static_cast<std::size_t>(i);
@@ -74,6 +79,9 @@ void writeFlatLineToStreams(double iline,
 
     for (int i = 0; i < clampedPunctureCount; ++i) {
         const std::size_t idx = punctureBase + static_cast<std::size_t>(i);
+        if (punctureValid != nullptr && (*punctureValid)[idx] == 0) {
+            continue;
+        }
         const PuncturePoint& p = punctures[idx];
         ipOut << lineToken << " " << p.step << " "
               << p.xyz.x << " " << p.xyz.y << " " << p.xyz.z << "\n";
@@ -120,6 +128,7 @@ void PoincareOutput::writeLineOutputsFlat(double iline,
                                           int punctureCount,
                                           const std::vector<Point3D>& trajectories,
                                           const std::vector<PuncturePoint>& punctures,
+                                          const std::vector<std::uint8_t>* punctureValid,
                                           const std::string& outputDir,
                                           const std::string& divertorTag) const {
     std::filesystem::create_directories(outputDir);
@@ -152,6 +161,7 @@ void PoincareOutput::writeLineOutputsFlat(double iline,
                            punctureCount,
                            trajectories,
                            punctures,
+                           punctureValid,
                            ipOut,
                            tpOut,
                            trajOut);
@@ -192,6 +202,7 @@ void PoincareOutput::writeCombinedOutputsFlat(const std::vector<double>& ilinePe
                                               int maxPuncPerSeed,
                                               const std::vector<Point3D>& trajectories,
                                               const std::vector<PuncturePoint>& punctures,
+                                              const std::vector<std::uint8_t>* punctureValid,
                                               const std::string& outputDir) const {
     if (ilinePerSeed.size() != trajCountPerSeed.size() || ilinePerSeed.size() != punctureCountPerSeed.size()) {
         throw std::runtime_error("Per-seed metadata arrays must all have the same size");
@@ -227,6 +238,7 @@ void PoincareOutput::writeCombinedOutputsFlat(const std::vector<double>& ilinePe
                                punctureCountPerSeed[i],
                                trajectories,
                                punctures,
+                               punctureValid,
                                ipOut,
                                tpOut,
                                trajOut);

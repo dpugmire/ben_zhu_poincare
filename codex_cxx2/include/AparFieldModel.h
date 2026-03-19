@@ -10,6 +10,45 @@ class AparFieldModel {
 public:
     explicit AparFieldModel(const AparData& data);
 
+    class ExecutionAccessor {
+    public:
+        explicit ExecutionAccessor(const AparFieldModel& model) : model_(model) {}
+
+        const AparData& data() const { return model_.data(); }
+
+        void evaluateStage(const XZPoint& point,
+                           int yStart1b,
+                           int region,
+                           int direction,
+                           int stage,
+                           XZDeriv& deriv) const {
+            model_.evaluateStage(point, yStart1b, region, direction, stage, deriv);
+        }
+
+        double interp1(const std::vector<double>& xp,
+                       const std::vector<double>& fp,
+                       double x) const {
+            return model_.interp1(xp, fp, x);
+        }
+
+        Point3D reconstructTrajectoryXYZ(const TrajectoryState& state) const {
+            return model_.reconstructTrajectoryXYZ(state);
+        }
+
+        Point3D reconstructPunctureXYZ(const Point2D& ind,
+                                       double zvalue) const {
+            return model_.reconstructPunctureXYZ(ind, zvalue);
+        }
+
+        double thetaFromY(double yind) const { return model_.thetaFromY(yind); }
+        double psiFromX(double xind) const { return model_.psiFromX(xind); }
+
+    private:
+        const AparFieldModel& model_;
+    };
+
+    ExecutionAccessor prepareExecution() const { return ExecutionAccessor(*this); }
+
     const AparData& data() const { return data_; }
 
     void evaluateStage(const XZPoint& point,

@@ -2,8 +2,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <limits>
-#include <stdexcept>
 
 namespace
 {
@@ -28,8 +28,8 @@ int computeMaxStateCountFromOptions(const TraceOptions& options)
   return (nsteps >= std::numeric_limits<int>::max()) ? std::numeric_limits<int>::max() : (nsteps + 1);
 }
 
-CrossingEval evaluateCrossing(const AparFieldModel& model,
-                              const std::vector<TrajectoryState>& states,
+CrossingEval evaluateCrossing(const AparFieldModel::ExecutionAccessor& model,
+                              const TrajectoryState* states,
                               std::size_t stateBase,
                               int tc0,
                               int tc1,
@@ -87,15 +87,16 @@ bool hasSignChange(double a, double b)
   return (a <= 0.0 && b >= 0.0) || (a >= 0.0 && b <= 0.0);
 }
 
-void tryDetectPunctureOnLastSegment(const AparFieldModel& model,
-                                    const std::vector<TrajectoryState>& states,
-                                    const std::vector<Point3D>& trajectories,
+void tryDetectPunctureOnLastSegment(const AparFieldModel::ExecutionAccessor& model,
+                                    const TrajectoryState* states,
+                                    const Point3D* trajectories,
                                     std::size_t stateBase,
                                     std::size_t trajBase,
                                     int stateCount,
                                     int direction,
                                     int maxPuncturesForSeed,
-                                    std::vector<PuncturePoint>& punctures,
+                                    PuncturePoint* punctures,
+                                    std::uint8_t* punctureValid,
                                     std::size_t punctureBase,
                                     int& punctureCount,
                                     double& lastFitRoot)
@@ -237,7 +238,12 @@ void tryDetectPunctureOnLastSegment(const AparFieldModel& model,
   }
   puncture.step = step;
 
-  punctures[punctureBase + static_cast<std::size_t>(punctureCount)] = puncture;
+  const std::size_t punctureIndex = punctureBase + static_cast<std::size_t>(punctureCount);
+  punctures[punctureIndex] = puncture;
+  if (punctureValid != nullptr)
+  {
+    punctureValid[punctureIndex] = static_cast<std::uint8_t>(1);
+  }
   ++punctureCount;
   lastFitRoot = fitRoot;
 }
@@ -279,41 +285,26 @@ void FieldLineIntegrator::rk4Step(const XZPoint& start, int yStart, int region, 
   end.z = start.z + direction * h6 * (k1.dzdy + 2.0 * k2.dzdy + 2.0 * k3.dzdy + k4.dzdy);
 }
 
-void FieldLineIntegrator::traceLine(const Point3D& seedInd,
-                                    std::size_t seedIndex,
-                                    std::vector<TrajectoryState>& states,
-                                    std::vector<Point3D>& trajectories,
-                                    std::vector<PuncturePoint>& punctures,
-                                    int& stateCount,
-                                    int& trajCount,
-                                    int& punctureCount,
-                                    int& endRegion,
-                                    double& connectionLength,
-                                    double& iline) const
+TraceStatus FieldLineIntegrator::traceLine(const Point3D& seedInd,
+                                           std::size_t seedIndex,
+                                           const TraceOutputViews& outputs,
+                                           int& stateCount,
+                                           int& trajCount,
+                                           int& punctureCount,
+                                           int& endRegion,
+                                           double& connectionLength,
+                                           double& iline) const
 {
+  auto modelExec = model_.prepareExecution();
+
+  TrajectoryState* states = outputs.states;
+  Point3D* trajectories = outputs.trajectories;
+  PuncturePoint* punctures = outputs.punctures;
+  std::uint8_t* punctureValid = outputs.punctureValid;
+
   const std::size_t stateBase = seedIndex * static_cast<std::size_t>(maxStatesPerSeed_);
   const std::size_t trajBase = seedIndex * static_cast<std::size_t>(maxTrajPerSeed_);
   const std::size_t punctureBase = seedIndex * static_cast<std::size_t>(maxPuncPerSeed_);
-
-  if (maxStatesPerSeed_ <= 0 || maxTrajPerSeed_ <= 0 || maxPuncPerSeed_ <= 0)
-  {
-    iline = seedInd.x;
-    endRegion = 98;
-    connectionLength = 0.0;
-    stateCount = 0;
-    trajCount = 0;
-    punctureCount = 0;
-    return;
-  }
-
-  if (stateBase + static_cast<std::size_t>(maxStatesPerSeed_) > states.size() ||
-      trajBase + static_cast<std::size_t>(maxTrajPerSeed_) > trajectories.size() ||
-      punctureBase + static_cast<std::size_t>(maxPuncPerSeed_) > punctures.size())
-  {
-    throw std::runtime_error("traceLine output arrays are smaller than seeds.size() * maxValue");
-  }
-
-  const AparData& d = model_.data();
 
   iline = seedInd.x;
   endRegion = 0;
@@ -322,11 +313,45 @@ void FieldLineIntegrator::traceLine(const Point3D& seedInd,
   trajCount = 0;
   punctureCount = 0;
 
+  if (maxStatesPerSeed_ <= 0 || maxTrajPerSeed_ <= 0 || maxPuncPerSeed_ <= 0)
+  {
+    endRegion = 98;
+    return TraceStatus::InvalidConfiguration;
+  }
+
+  if (states == nullptr || trajectories == nullptr || punctures == nullptr)
+  {
+    endRegion = 98;
+    return TraceStatus::OutputTooSmall;
+  }
+
+  if (stateBase + static_cast<std::size_t>(maxStatesPerSeed_) > outputs.statesSize ||
+      trajBase + static_cast<std::size_t>(maxTrajPerSeed_) > outputs.trajectoriesSize ||
+      punctureBase + static_cast<std::size_t>(maxPuncPerSeed_) > outputs.puncturesSize)
+  {
+    endRegion = 98;
+    return TraceStatus::OutputTooSmall;
+  }
+
+  if (punctureValid != nullptr)
+  {
+    if (punctureBase + static_cast<std::size_t>(maxPuncPerSeed_) > outputs.punctureValidSize)
+    {
+      endRegion = 98;
+      return TraceStatus::OutputTooSmall;
+    }
+    std::fill(punctureValid + punctureBase,
+              punctureValid + punctureBase + static_cast<std::size_t>(maxPuncPerSeed_),
+              static_cast<std::uint8_t>(0));
+  }
+
+  const AparData& d = model_.data();
+
   const double xindSeed = seedInd.x;
   if (xindSeed < 1.0 || xindSeed > static_cast<double>(d.nx))
   {
     endRegion = 99;
-    return;
+    return TraceStatus::InvalidSeed;
   }
 
   const int maxStateCount = std::min(maxStatesPerSeed_, maxTrajPerSeed_);
@@ -334,12 +359,12 @@ void FieldLineIntegrator::traceLine(const Point3D& seedInd,
   if (maxStateCount <= 0)
   {
     endRegion = 98;
-    return;
+    return TraceStatus::InvalidConfiguration;
   }
 
   double xind = xindSeed;
   XZPoint current;
-  current.x = model_.interp1(d.xiarray, d.xarray, xind);
+  current.x = modelExec.interp1(d.xiarray, d.xarray, xind);
   int yStart = static_cast<int>(std::llround(seedInd.y));
   if (yStart < 1)
   {
@@ -350,7 +375,7 @@ void FieldLineIntegrator::traceLine(const Point3D& seedInd,
     yStart = d.ny;
   }
   const double zind0 = seedInd.z;
-  current.z = model_.interp1(d.ziarray, d.zarray, zind0);
+  current.z = modelExec.interp1(d.ziarray, d.zarray, zind0);
 
   int region = 1;
   if (xind < static_cast<double>(d.ixsep) + 0.5)
@@ -376,7 +401,7 @@ void FieldLineIntegrator::traceLine(const Point3D& seedInd,
   initial.rawZ = current.z;
 
   states[stateBase + static_cast<std::size_t>(localStateCount)] = initial;
-  trajectories[trajBase + static_cast<std::size_t>(localTrajCount)] = model_.reconstructTrajectoryXYZ(initial);
+  trajectories[trajBase + static_cast<std::size_t>(localTrajCount)] = modelExec.reconstructTrajectoryXYZ(initial);
   ++localStateCount;
   ++localTrajCount;
 
@@ -412,7 +437,7 @@ void FieldLineIntegrator::traceLine(const Point3D& seedInd,
         }
         else
         {
-          xind = model_.interp1(d.xarray, d.xiarray, next.x);
+          xind = modelExec.interp1(d.xarray, d.xiarray, next.x);
           if (xind > static_cast<double>(d.ixsep) + 0.5)
           {
             region = 1;
@@ -421,19 +446,19 @@ void FieldLineIntegrator::traceLine(const Point3D& seedInd,
 
         if (options_.direction == 1 && yStart == d.nypf2 && region == 0)
         {
-          const double shift = model_.interp1(d.xiarray, d.shiftAngle, xind);
+          const double shift = modelExec.interp1(d.xiarray, d.shiftAngle, xind);
           next.z += shift;
           yEnd = d.nypf1 + 1;
         }
         if (options_.direction == -1 && yStart == (d.nypf1 + 1) && region == 0)
         {
-          const double shift = model_.interp1(d.xiarray, d.shiftAngle, xind);
+          const double shift = modelExec.interp1(d.xiarray, d.shiftAngle, xind);
           next.z -= shift;
           yEnd = d.nypf2;
         }
 
         next.z = d.wrapZ(next.z);
-        const double zind = model_.interp1(d.zarray, d.ziarray, next.z);
+        const double zind = modelExec.interp1(d.zarray, d.ziarray, next.z);
 
         TrajectoryState step;
         step.turn = iturn;
@@ -445,13 +470,13 @@ void FieldLineIntegrator::traceLine(const Point3D& seedInd,
         step.rawZ = rawZEnd;
 
         states[stateBase + static_cast<std::size_t>(localStateCount)] = step;
-        trajectories[trajBase + static_cast<std::size_t>(localTrajCount)] = model_.reconstructTrajectoryXYZ(step);
+        trajectories[trajBase + static_cast<std::size_t>(localTrajCount)] = modelExec.reconstructTrajectoryXYZ(step);
         ++localStateCount;
         ++localTrajCount;
 
         if (maxPunctureCount > 0)
         {
-          tryDetectPunctureOnLastSegment(model_,
+          tryDetectPunctureOnLastSegment(modelExec,
                                          states,
                                          trajectories,
                                          stateBase,
@@ -460,6 +485,7 @@ void FieldLineIntegrator::traceLine(const Point3D& seedInd,
                                          options_.direction,
                                          maxPunctureCount,
                                          punctures,
+                                         punctureValid,
                                          punctureBase,
                                          localPunctureCount,
                                          lastFitRoot);
@@ -494,7 +520,7 @@ void FieldLineIntegrator::traceLine(const Point3D& seedInd,
         }
         else
         {
-          xind = model_.interp1(d.xarray, d.xiarray, next.x);
+          xind = modelExec.interp1(d.xarray, d.xiarray, next.x);
           if (xind < static_cast<double>(d.ixsep) + 0.5 && yEnd > d.nypf1 && yEnd < d.nypf2 + 1)
           {
             region = 0;
@@ -515,7 +541,7 @@ void FieldLineIntegrator::traceLine(const Point3D& seedInd,
         }
 
         next.z = d.wrapZ(next.z);
-        const double zind = model_.interp1(d.zarray, d.ziarray, next.z);
+        const double zind = modelExec.interp1(d.zarray, d.ziarray, next.z);
 
         TrajectoryState step;
         step.turn = iturn;
@@ -527,13 +553,13 @@ void FieldLineIntegrator::traceLine(const Point3D& seedInd,
         step.rawZ = rawZEnd;
 
         states[stateBase + static_cast<std::size_t>(localStateCount)] = step;
-        trajectories[trajBase + static_cast<std::size_t>(localTrajCount)] = model_.reconstructTrajectoryXYZ(step);
+        trajectories[trajBase + static_cast<std::size_t>(localTrajCount)] = modelExec.reconstructTrajectoryXYZ(step);
         ++localStateCount;
         ++localTrajCount;
 
         if (maxPunctureCount > 0)
         {
-          tryDetectPunctureOnLastSegment(model_,
+          tryDetectPunctureOnLastSegment(modelExec,
                                          states,
                                          trajectories,
                                          stateBase,
@@ -542,6 +568,7 @@ void FieldLineIntegrator::traceLine(const Point3D& seedInd,
                                          options_.direction,
                                          maxPunctureCount,
                                          punctures,
+                                         punctureValid,
                                          punctureBase,
                                          localPunctureCount,
                                          lastFitRoot);
@@ -575,13 +602,20 @@ void FieldLineIntegrator::traceLine(const Point3D& seedInd,
   stateCount = localStateCount;
   trajCount = localTrajCount;
   punctureCount = localPunctureCount;
+
+  if (region < 10)
+  {
+    return TraceStatus::MaxStepLimitReached;
+  }
+  return TraceStatus::Ok;
 }
 
-void FieldLineIntegrator::traceLine(const Point3D& seedInd, LineTraceResult& out) const
+TraceStatus FieldLineIntegrator::traceLine(const Point3D& seedInd, LineTraceResult& out) const
 {
   std::vector<TrajectoryState> states(static_cast<std::size_t>(maxStatesPerSeed_));
   std::vector<Point3D> trajectories(static_cast<std::size_t>(maxTrajPerSeed_));
   std::vector<PuncturePoint> punctures(static_cast<std::size_t>(maxPuncPerSeed_));
+  std::vector<std::uint8_t> punctureValid(static_cast<std::size_t>(maxPuncPerSeed_), static_cast<std::uint8_t>(0));
 
   int stateCount = 0;
   int trajCount = 0;
@@ -590,17 +624,15 @@ void FieldLineIntegrator::traceLine(const Point3D& seedInd, LineTraceResult& out
   double connectionLength = 0.0;
   double iline = 0.0;
 
-  traceLine(seedInd,
-            0,
-            states,
-            trajectories,
-            punctures,
-            stateCount,
-            trajCount,
-            punctureCount,
-            endRegion,
-            connectionLength,
-            iline);
+  const TraceStatus status = traceLine(seedInd,
+                                       0,
+                                       makeTraceOutputViews(states, trajectories, punctures, &punctureValid),
+                                       stateCount,
+                                       trajCount,
+                                       punctureCount,
+                                       endRegion,
+                                       connectionLength,
+                                       iline);
 
   out.iline = iline;
   out.endRegion = endRegion;
@@ -613,4 +645,5 @@ void FieldLineIntegrator::traceLine(const Point3D& seedInd, LineTraceResult& out
   out.states.assign(states.begin(), states.begin() + clampedStateCount);
   out.trajectoryXYZ.assign(trajectories.begin(), trajectories.begin() + clampedTrajCount);
   out.punctures.assign(punctures.begin(), punctures.begin() + clampedPunctureCount);
+  return status;
 }

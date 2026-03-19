@@ -20,6 +20,7 @@ public:
                               int punctureCount,
                               const std::vector<Point3D>& trajectories,
                               const std::vector<PuncturePoint>& punctures,
+                              const std::vector<std::uint8_t>* punctureValid,
                               const std::string& outputDir,
                               const std::string& divertorTag) const;
 
@@ -33,6 +34,7 @@ public:
                                   int maxPuncPerSeed,
                                   const std::vector<Point3D>& trajectories,
                                   const std::vector<PuncturePoint>& punctures,
+                                  const std::vector<std::uint8_t>* punctureValid,
                                   const std::string& outputDir) const;
 };
 
