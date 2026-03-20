@@ -14,6 +14,7 @@ if (CODEX_USE_MPI)
 endif()
 if (CODEX_USE_VISKORES)
     find_package(Viskores REQUIRED CONFIG)
+    find_package(OpenMP REQUIRED COMPONENTS CXX)
 endif()
 
 find_path(NETCDF_C_INCLUDE_DIR
@@ -42,6 +43,8 @@ add_executable(trace_fieldlines
     src/AparData.cpp
     src/AparFieldModel.cpp
     src/FieldLineIntegrator.cpp
+    src/TracePostProcessor.cpp
+    src/ViskoresFieldLineTracer.cpp
     src/PunctureDetector.cpp
     src/PoincareOutput.cpp
     src/MatlabComparator.cpp
@@ -65,5 +68,5 @@ endif()
 
 if (CODEX_USE_VISKORES)
     target_compile_definitions(trace_fieldlines PRIVATE CODEX_USE_VISKORES=1)
-    target_link_libraries(trace_fieldlines PRIVATE viskores::cont)
+    target_link_libraries(trace_fieldlines PRIVATE viskores::cont OpenMP::OpenMP_CXX)
 endif()

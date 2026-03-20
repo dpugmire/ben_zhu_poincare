@@ -25,6 +25,9 @@
 #include "FieldLineIntegrator.h"
 #include "PoincareOutput.h"
 #include "ValidationSuite.h"
+#if defined(CODEX_USE_VISKORES)
+#include "ViskoresFieldLineTracer.h"
+#endif
 
 namespace
 {
@@ -104,6 +107,7 @@ void printUsage(const char* prog)
             << "  --np-max N            max punctures per line (default: 100)\n"
             << "  --max-steps N         max integration steps per line (default: 200 * np-max)\n"
             << "  --tol VALUE           max-abs tolerance (default: 1e-8)\n"
+            << "  --trace-engine ENG    tracing backend: cpu|viskores (default: cpu)\n"
             << "  --viskores-device DEV viskores device: serial|openmp|kokkos (default: serial)\n"
             << "  --compare             enable MATLAB comparison mode (default is trace-only)\n"
             << "  --help                show this help\n";
@@ -186,6 +190,12 @@ enum class LineSpecMode
   range
 };
 
+enum class TraceEngine
+{
+  Cpu,
+  Viskores
+};
+
 bool isFatalTraceStatus(TraceStatus status)
 {
   return status == TraceStatus::InvalidConfiguration || status == TraceStatus::OutputTooSmall;
@@ -200,6 +210,16 @@ std::string toLowerAscii(std::string text)
 bool isSupportedViskoresDeviceChoice(const std::string& valueLower)
 {
   return valueLower == "serial" || valueLower == "openmp" || valueLower == "kokkos";
+}
+
+bool isSupportedTraceEngineChoice(const std::string& valueLower)
+{
+  return valueLower == "cpu" || valueLower == "viskores";
+}
+
+TraceEngine parseTraceEngineChoice(const std::string& valueLower)
+{
+  return (valueLower == "viskores") ? TraceEngine::Viskores : TraceEngine::Cpu;
 }
 
 #if defined(CODEX_USE_VISKORES)
@@ -380,6 +400,93 @@ void traceLocalTasksForDivertor(const std::string& tag,
   }
 }
 
+#if defined(CODEX_USE_VISKORES)
+void traceLocalTasksForDivertorViskores(const std::string& tag,
+                                        const AparData& data,
+                                        const ValidationConfig& config,
+                                        const std::vector<TraceTask>& localTasks,
+                                        int rank,
+                                        int maxStatesPerSeed,
+                                        int maxTrajPerSeed,
+                                        int maxPuncPerSeed,
+                                        std::vector<double>& ilinePerSeed,
+                                        std::vector<int>& endRegionPerSeed,
+                                        std::vector<double>& connectionLengthPerSeed,
+                                        std::vector<int>& stateCountPerSeed,
+                                        std::vector<int>& trajCountPerSeed,
+                                        std::vector<int>& punctureCountPerSeed,
+                                        std::vector<TrajectoryState>& states,
+                                        std::vector<Point3D>& trajectories,
+                                        std::vector<PuncturePoint>& punctures,
+                                        std::vector<std::uint8_t>& punctureValid,
+                                        bool& localFatal,
+                                        std::string& localFatalMsg)
+{
+  ViskoresFieldLineTracer tracer(data, config.traceOptions);
+
+  if (tracer.maxStatesPerSeed() != maxStatesPerSeed || tracer.maxTrajPerSeed() != maxTrajPerSeed ||
+      tracer.maxPuncPerSeed() != maxPuncPerSeed)
+  {
+    localFatal = true;
+    localFatalMsg = "Viskores tracer max-per-seed caps differ from preallocated array caps";
+    return;
+  }
+
+  std::vector<Point3D> batchSeeds;
+  std::vector<CodeXId> batchGlobalSeedIndices;
+  batchSeeds.reserve(localTasks.size());
+  batchGlobalSeedIndices.reserve(localTasks.size());
+
+  for (std::size_t localIdx = 0; localIdx < localTasks.size(); ++localIdx)
+  {
+    if (localTasks[localIdx].divertorTag != tag)
+    {
+      continue;
+    }
+    batchSeeds.push_back(localTasks[localIdx].seedInd);
+    batchGlobalSeedIndices.push_back(static_cast<CodeXId>(localIdx));
+  }
+
+  if (batchSeeds.empty())
+  {
+    return;
+  }
+
+  std::vector<TraceStatus> traceStatuses;
+  tracer.traceLines(batchSeeds,
+                    batchGlobalSeedIndices,
+                    makeTraceOutputViews(states, trajectories, punctures, &punctureValid),
+                    ilinePerSeed,
+                    endRegionPerSeed,
+                    connectionLengthPerSeed,
+                    stateCountPerSeed,
+                    trajCountPerSeed,
+                    punctureCountPerSeed,
+                    traceStatuses);
+
+  for (std::size_t batchIdx = 0; batchIdx < batchSeeds.size(); ++batchIdx)
+  {
+    const std::size_t localIdx = static_cast<std::size_t>(batchGlobalSeedIndices[batchIdx]);
+    const TraceStatus traceStatus = traceStatuses[batchIdx];
+    if (isFatalTraceStatus(traceStatus))
+    {
+      localFatal = true;
+      localFatalMsg = "viskores trace failed on rank " + std::to_string(rank) + " for local seed " + std::to_string(localIdx) +
+        " with status " + traceStatusName(traceStatus);
+      return;
+    }
+
+    std::cout << "Rank " << rank << " traced " << tag << " line " << localTasks[localIdx].seedInd.x << ": traj=" << trajCountPerSeed[localIdx]
+              << ", punctures=" << punctureCountPerSeed[localIdx];
+    if (traceStatus != TraceStatus::Ok)
+    {
+      std::cout << ", status=" << traceStatusName(traceStatus);
+    }
+    std::cout << std::endl;
+  }
+}
+#endif
+
 } // namespace
 
 int main(int argc, char** argv)
@@ -406,6 +513,7 @@ int main(int argc, char** argv)
   config.tolerance = 1.0e-8;
 
   bool doCompare = false;
+  std::string traceEngineChoice = "cpu";
   std::string viskoresDevice = "serial";
   bool viskoresDeviceSpecified = false;
   LineSpecMode lineSpecMode = LineSpecMode::none;
@@ -498,6 +606,11 @@ int main(int argc, char** argv)
       config.tolerance = std::atof(argv[++i]);
       continue;
     }
+    if (arg == "--trace-engine" && i + 1 < argc)
+    {
+      traceEngineChoice = toLowerAscii(argv[++i]);
+      continue;
+    }
     if (arg == "--viskores-device" && i + 1 < argc)
     {
       viskoresDevice = toLowerAscii(argv[++i]);
@@ -554,17 +667,39 @@ int main(int argc, char** argv)
     return 1;
   }
 
-#if defined(CODEX_USE_VISKORES)
-  std::string viskoresDeviceError;
-  if (!configureViskoresDevice(viskoresDevice, viskoresDeviceError))
+  if (!isSupportedTraceEngineChoice(traceEngineChoice))
   {
     if (mpi.rank == 0)
     {
-      std::cerr << "Error: " << viskoresDeviceError << "\n";
+      std::cerr << "Error: --trace-engine must be one of cpu|viskores\n";
     }
     return 1;
   }
+
+  const TraceEngine traceEngine = parseTraceEngineChoice(traceEngineChoice);
+
+#if defined(CODEX_USE_VISKORES)
+  if (traceEngine == TraceEngine::Viskores)
+  {
+    std::string viskoresDeviceError;
+    if (!configureViskoresDevice(viskoresDevice, viskoresDeviceError))
+    {
+      if (mpi.rank == 0)
+      {
+        std::cerr << "Error: " << viskoresDeviceError << "\n";
+      }
+      return 1;
+    }
+  }
 #else
+  if (traceEngine == TraceEngine::Viskores)
+  {
+    if (mpi.rank == 0)
+    {
+      std::cerr << "Error: --trace-engine viskores was requested, but this binary was built without Viskores support\n";
+    }
+    return 1;
+  }
   if (viskoresDeviceSpecified)
   {
     if (mpi.rank == 0)
@@ -588,6 +723,15 @@ int main(int argc, char** argv)
 
     if (doCompare)
     {
+      if (traceEngine == TraceEngine::Viskores)
+      {
+        if (mpi.rank == 0)
+        {
+          std::cerr << "Error: --compare currently uses the CPU tracer only; run trace-only mode for viskores output comparison\n";
+        }
+        return 1;
+      }
+
       if (lineSpecMode == LineSpecMode::range)
       {
         if (mpi.rank == 0)
@@ -717,50 +861,106 @@ int main(int argc, char** argv)
 
     if (doSingle && !localFatal)
     {
-      traceLocalTasksForDivertor("single",
-                                 singleData,
-                                 config,
-                                 localTasks,
-                                 mpi.rank,
-                                 maxStatesPerSeed,
-                                 maxTrajPerSeed,
-                                 maxPuncPerSeed,
-                                 ilinePerSeed,
-                                 endRegionPerSeed,
-                                 connectionLengthPerSeed,
-                                 stateCountPerSeed,
-                                 trajCountPerSeed,
-                                 punctureCountPerSeed,
-                                 states,
-                                 trajectories,
-                                 punctures,
-                                 punctureValid,
-                                 localFatal,
-                                 localFatalMsg);
+      if (traceEngine == TraceEngine::Viskores)
+      {
+#if defined(CODEX_USE_VISKORES)
+        traceLocalTasksForDivertorViskores("single",
+                                           singleData,
+                                           config,
+                                           localTasks,
+                                           mpi.rank,
+                                           maxStatesPerSeed,
+                                           maxTrajPerSeed,
+                                           maxPuncPerSeed,
+                                           ilinePerSeed,
+                                           endRegionPerSeed,
+                                           connectionLengthPerSeed,
+                                           stateCountPerSeed,
+                                           trajCountPerSeed,
+                                           punctureCountPerSeed,
+                                           states,
+                                           trajectories,
+                                           punctures,
+                                           punctureValid,
+                                           localFatal,
+                                           localFatalMsg);
+#endif
+      }
+      else
+      {
+        traceLocalTasksForDivertor("single",
+                                   singleData,
+                                   config,
+                                   localTasks,
+                                   mpi.rank,
+                                   maxStatesPerSeed,
+                                   maxTrajPerSeed,
+                                   maxPuncPerSeed,
+                                   ilinePerSeed,
+                                   endRegionPerSeed,
+                                   connectionLengthPerSeed,
+                                   stateCountPerSeed,
+                                   trajCountPerSeed,
+                                   punctureCountPerSeed,
+                                   states,
+                                   trajectories,
+                                   punctures,
+                                   punctureValid,
+                                   localFatal,
+                                   localFatalMsg);
+      }
     }
 
     if (doCirc && !localFatal)
     {
-      traceLocalTasksForDivertor("circ",
-                                 circData,
-                                 config,
-                                 localTasks,
-                                 mpi.rank,
-                                 maxStatesPerSeed,
-                                 maxTrajPerSeed,
-                                 maxPuncPerSeed,
-                                 ilinePerSeed,
-                                 endRegionPerSeed,
-                                 connectionLengthPerSeed,
-                                 stateCountPerSeed,
-                                 trajCountPerSeed,
-                                 punctureCountPerSeed,
-                                 states,
-                                 trajectories,
-                                 punctures,
-                                 punctureValid,
-                                 localFatal,
-                                 localFatalMsg);
+      if (traceEngine == TraceEngine::Viskores)
+      {
+#if defined(CODEX_USE_VISKORES)
+        traceLocalTasksForDivertorViskores("circ",
+                                           circData,
+                                           config,
+                                           localTasks,
+                                           mpi.rank,
+                                           maxStatesPerSeed,
+                                           maxTrajPerSeed,
+                                           maxPuncPerSeed,
+                                           ilinePerSeed,
+                                           endRegionPerSeed,
+                                           connectionLengthPerSeed,
+                                           stateCountPerSeed,
+                                           trajCountPerSeed,
+                                           punctureCountPerSeed,
+                                           states,
+                                           trajectories,
+                                           punctures,
+                                           punctureValid,
+                                           localFatal,
+                                           localFatalMsg);
+#endif
+      }
+      else
+      {
+        traceLocalTasksForDivertor("circ",
+                                   circData,
+                                   config,
+                                   localTasks,
+                                   mpi.rank,
+                                   maxStatesPerSeed,
+                                   maxTrajPerSeed,
+                                   maxPuncPerSeed,
+                                   ilinePerSeed,
+                                   endRegionPerSeed,
+                                   connectionLengthPerSeed,
+                                   stateCountPerSeed,
+                                   trajCountPerSeed,
+                                   punctureCountPerSeed,
+                                   states,
+                                   trajectories,
+                                   punctures,
+                                   punctureValid,
+                                   localFatal,
+                                   localFatalMsg);
+      }
     }
 
     const int anyFatal = mpi.allreduceMaxInt(localFatal ? 1 : 0);
