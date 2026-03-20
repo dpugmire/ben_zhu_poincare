@@ -112,9 +112,9 @@ void ViskoresFieldLineTracer::traceLines(const std::vector<Point3D>& seeds,
 
   auto seedHandle = viskores::cont::make_ArrayHandle(seeds, viskores::CopyFlag::On);
 
-  viskores::cont::ArrayHandle<int> batchStateCounts;
-  viskores::cont::ArrayHandle<int> batchEndRegions;
-  viskores::cont::ArrayHandle<int> batchStatusCodes;
+  viskores::cont::ArrayHandle<viskores::Id> batchStateCounts;
+  viskores::cont::ArrayHandle<viskores::Id> batchEndRegions;
+  viskores::cont::ArrayHandle<viskores::Id> batchStatusCodes;
   viskores::cont::ArrayHandle<TrajectoryState> batchStates;
 
   batchStateCounts.Allocate(seedHandle.GetNumberOfValues());
@@ -140,14 +140,14 @@ void ViskoresFieldLineTracer::traceLines(const std::vector<Point3D>& seeds,
     }
 
     ilinePerSeed[globalSeedIndex] = seeds[batchIdx].x;
-    endRegionPerSeed[globalSeedIndex] = endRegionPortal.Get(static_cast<viskores::Id>(batchIdx));
-    stateCountPerSeed[globalSeedIndex] = std::max(0, std::min(stateCountPortal.Get(static_cast<viskores::Id>(batchIdx)), maxStatesPerSeed_));
+    endRegionPerSeed[globalSeedIndex] = static_cast<int>(endRegionPortal.Get(static_cast<viskores::Id>(batchIdx)));
+    stateCountPerSeed[globalSeedIndex] = std::max(0, std::min(static_cast<int>(stateCountPortal.Get(static_cast<viskores::Id>(batchIdx))), maxStatesPerSeed_));
     trajCountPerSeed[globalSeedIndex] = 0;
     punctureCountPerSeed[globalSeedIndex] = 0;
     connectionLengthPerSeed[globalSeedIndex] = 0.0;
     clearSeedPunctureValid(outputs, globalSeedIndex, maxPuncPerSeed_);
 
-    const int statusCode = statusPortal.Get(static_cast<viskores::Id>(batchIdx));
+    const int statusCode = static_cast<int>(statusPortal.Get(static_cast<viskores::Id>(batchIdx)));
     traceStatuses[batchIdx] = static_cast<TraceStatus>(statusCode);
 
     const std::size_t globalStateBase = globalSeedIndex * static_cast<std::size_t>(maxStatesPerSeed_);
