@@ -2,8 +2,10 @@
 #include <cctype>
 #include <cmath>
 #include <cstddef>
+#include <chrono>
 #include <cstdint>
 #include <cstdlib>
+#include <iomanip>
 #include <iostream>
 #include <limits>
 #include <sstream>
@@ -61,6 +63,20 @@ public:
     return globalValue;
   }
 
+  double allreduceMaxDouble(double localValue) const
+  {
+    double globalValue = localValue;
+    MPI_Allreduce(&localValue, &globalValue, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
+    return globalValue;
+  }
+
+  double allreduceSumDouble(double localValue) const
+  {
+    double globalValue = localValue;
+    MPI_Allreduce(&localValue, &globalValue, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+    return globalValue;
+  }
+
   void abortAll(int code) const { MPI_Abort(MPI_COMM_WORLD, code); }
 
   int rank = 0;
@@ -78,6 +94,10 @@ public:
   void barrier() const {}
 
   int allreduceMaxInt(int localValue) const { return localValue; }
+
+  double allreduceMaxDouble(double localValue) const { return localValue; }
+
+  double allreduceSumDouble(double localValue) const { return localValue; }
 
   void abortAll(int code) const { std::exit(code); }
 
@@ -246,6 +266,81 @@ void printTraceBackendSelection(const MpiRuntime& mpi, TraceEngine traceEngine, 
     }
     mpi.barrier();
   }
+}
+
+
+using SteadyClock = std::chrono::steady_clock;
+
+struct TimingSummary
+{
+  double avgSeconds = 0.0;
+  double maxSeconds = 0.0;
+};
+
+double elapsedSeconds(const SteadyClock::time_point& start, const SteadyClock::time_point& end)
+{
+  return std::chrono::duration<double>(end - start).count();
+}
+
+TimingSummary summarizeTiming(const MpiRuntime& mpi, double localSeconds)
+{
+  TimingSummary summary;
+  summary.avgSeconds = mpi.allreduceSumDouble(localSeconds) / static_cast<double>(std::max(1, mpi.size));
+  summary.maxSeconds = mpi.allreduceMaxDouble(localSeconds);
+  return summary;
+}
+
+void printTimingLine(const char* label, const TimingSummary& summary)
+{
+  std::cout << "  " << label << ": avg=" << summary.avgSeconds << " s, max=" << summary.maxSeconds << " s\n";
+}
+
+void printTraceTimingSummary(const MpiRuntime& mpi,
+                             double localLoadSeconds,
+                             double localTraceSeconds,
+                             double localOutputSeconds,
+                             double localTotalSeconds)
+{
+  const TimingSummary load = summarizeTiming(mpi, localLoadSeconds);
+  const TimingSummary trace = summarizeTiming(mpi, localTraceSeconds);
+  const TimingSummary output = summarizeTiming(mpi, localOutputSeconds);
+  const TimingSummary total = summarizeTiming(mpi, localTotalSeconds);
+
+  if (mpi.rank != 0)
+  {
+    return;
+  }
+
+  const std::ios::fmtflags oldFlags = std::cout.flags();
+  const std::streamsize oldPrecision = std::cout.precision();
+  std::cout << std::fixed << std::setprecision(6);
+  std::cout << "\nTiming summary (trace-only, seconds)\n";
+  printTimingLine("load", load);
+  printTimingLine("trace", trace);
+  printTimingLine("output", output);
+  printTimingLine("total", total);
+  std::cout.flags(oldFlags);
+  std::cout.precision(oldPrecision);
+}
+
+void printCompareTimingSummary(const MpiRuntime& mpi, double localCompareSeconds, double localTotalSeconds)
+{
+  const TimingSummary compare = summarizeTiming(mpi, localCompareSeconds);
+  const TimingSummary total = summarizeTiming(mpi, localTotalSeconds);
+
+  if (mpi.rank != 0)
+  {
+    return;
+  }
+
+  const std::ios::fmtflags oldFlags = std::cout.flags();
+  const std::streamsize oldPrecision = std::cout.precision();
+  std::cout << std::fixed << std::setprecision(6);
+  std::cout << "\nTiming summary (compare, seconds)\n";
+  printTimingLine("compare", compare);
+  printTimingLine("total", total);
+  std::cout.flags(oldFlags);
+  std::cout.precision(oldPrecision);
 }
 
 #if defined(CODEX_USE_VISKORES)
@@ -738,6 +833,7 @@ int main(int argc, char** argv)
 
   try
   {
+    const SteadyClock::time_point totalStart = SteadyClock::now();
     printTraceBackendSelection(mpi, traceEngine, viskoresDevice);
 
     if (doCompare && mpi.size > 1)
@@ -787,8 +883,10 @@ int main(int argc, char** argv)
         }
       }
 
+      const SteadyClock::time_point compareStart = SteadyClock::now();
       ValidationSuite suite;
       const std::vector<ValidationResult> results = suite.run(config);
+      const SteadyClock::time_point compareEnd = SteadyClock::now();
 
       int passed = 0;
       for (const auto& r : results)
@@ -828,6 +926,7 @@ int main(int argc, char** argv)
       return 1;
     }
 
+    const SteadyClock::time_point loadStart = SteadyClock::now();
     AparData singleData;
     AparData circData;
     if (doSingle)
@@ -838,7 +937,10 @@ int main(int argc, char** argv)
     {
       circData.load(config.aparCircPath);
     }
+    const SteadyClock::time_point loadEnd = SteadyClock::now();
+    const double localLoadSeconds = elapsedSeconds(loadStart, loadEnd);
 
+    const SteadyClock::time_point traceStart = SteadyClock::now();
     const std::vector<TraceTask> allTasks =
       buildAllTasks(requestedLines, doSingle, doCirc, doSingle ? &singleData : nullptr, doCirc ? &circData : nullptr);
     const size_t localBegin = partitionBegin(allTasks.size(), mpi.rank, mpi.size);
@@ -1001,6 +1103,10 @@ int main(int argc, char** argv)
       return 1;
     }
 
+    const SteadyClock::time_point traceEnd = SteadyClock::now();
+    const double localTraceSeconds = elapsedSeconds(traceStart, traceEnd);
+
+    const SteadyClock::time_point outputStart = SteadyClock::now();
     PoincareOutput output;
     mpi.barrier();
 
