@@ -37,7 +37,9 @@ public:
                   std::vector<int>& stateCountPerSeed,
                   std::vector<int>& trajCountPerSeed,
                   std::vector<int>& punctureCountPerSeed,
-                  std::vector<TraceStatus>& traceStatuses) const;
+                  std::vector<TraceStatus>& traceStatuses,
+                  double* deviceInvokeSeconds = nullptr,
+                  double* hostPostprocessSeconds = nullptr) const;
 
 private:
   const AparData& data_;

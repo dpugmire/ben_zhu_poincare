@@ -3,11 +3,13 @@
 #if defined(CODEX_USE_VISKORES)
 
 #include <algorithm>
+#include <chrono>
 #include <limits>
 #include <stdexcept>
 
 #include <viskores/cont/ArrayHandle.h>
 #include <viskores/cont/Invoker.h>
+#include <viskores/cont/Timer.h>
 
 #include "AparFieldModel.h"
 #include "TracePostProcessor.h"
@@ -67,9 +69,19 @@ void ViskoresFieldLineTracer::traceLines(const std::vector<Point3D>& seeds,
                                          std::vector<int>& stateCountPerSeed,
                                          std::vector<int>& trajCountPerSeed,
                                          std::vector<int>& punctureCountPerSeed,
-                                         std::vector<TraceStatus>& traceStatuses) const
+                                         std::vector<TraceStatus>& traceStatuses,
+                                         double* deviceInvokeSeconds,
+                                         double* hostPostprocessSeconds) const
 {
   traceStatuses.assign(seeds.size(), TraceStatus::Ok);
+  if (deviceInvokeSeconds != nullptr)
+  {
+    *deviceInvokeSeconds = 0.0;
+  }
+  if (hostPostprocessSeconds != nullptr)
+  {
+    *hostPostprocessSeconds = 0.0;
+  }
 
   if (seeds.empty())
   {
@@ -122,8 +134,18 @@ void ViskoresFieldLineTracer::traceLines(const std::vector<Point3D>& seeds,
   batchStatusCodes.Allocate(seedHandle.GetNumberOfValues());
   batchStates.Allocate(seedHandle.GetNumberOfValues() * static_cast<viskores::Id>(maxStatesPerSeed_));
 
-  invoker(worklet, seedHandle, field, batchStateCounts, batchEndRegions, batchStatusCodes, batchStates);
+  using SteadyClock = std::chrono::steady_clock;
 
+  viskores::cont::Timer deviceTimer(invoker.GetDevice());
+  deviceTimer.Start();
+  invoker(worklet, seedHandle, field, batchStateCounts, batchEndRegions, batchStatusCodes, batchStates);
+  deviceTimer.Stop();
+  if (deviceInvokeSeconds != nullptr)
+  {
+    *deviceInvokeSeconds = static_cast<double>(deviceTimer.GetElapsedTime());
+  }
+
+  const SteadyClock::time_point hostPostprocessStart = SteadyClock::now();
   const auto stateCountPortal = batchStateCounts.ReadPortal();
   const auto endRegionPortal = batchEndRegions.ReadPortal();
   const auto statusPortal = batchStatusCodes.ReadPortal();
@@ -172,6 +194,11 @@ void ViskoresFieldLineTracer::traceLines(const std::vector<Point3D>& seeds,
                                              punctureCountPerSeed[globalSeedIndex],
                                              connectionLengthPerSeed[globalSeedIndex]);
     }
+  }
+
+  if (hostPostprocessSeconds != nullptr)
+  {
+    *hostPostprocessSeconds = std::chrono::duration<double>(SteadyClock::now() - hostPostprocessStart).count();
   }
 }
 

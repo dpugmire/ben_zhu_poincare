@@ -299,12 +299,16 @@ void printTraceTimingSummary(const MpiRuntime& mpi,
                              double localLoadSeconds,
                              double localTraceSeconds,
                              double localOutputSeconds,
-                             double localTotalSeconds)
+                             double localTotalSeconds,
+                             const char* traceLabel,
+                             double localHostPostprocessSeconds = -1.0)
 {
   const TimingSummary load = summarizeTiming(mpi, localLoadSeconds);
   const TimingSummary trace = summarizeTiming(mpi, localTraceSeconds);
   const TimingSummary output = summarizeTiming(mpi, localOutputSeconds);
   const TimingSummary total = summarizeTiming(mpi, localTotalSeconds);
+  const bool haveHostPostprocess = (localHostPostprocessSeconds >= 0.0);
+  const TimingSummary hostPostprocess = haveHostPostprocess ? summarizeTiming(mpi, localHostPostprocessSeconds) : TimingSummary{};
 
   if (mpi.rank != 0)
   {
@@ -316,13 +320,16 @@ void printTraceTimingSummary(const MpiRuntime& mpi,
   std::cout << std::fixed << std::setprecision(6);
   std::cout << "\nTiming summary (trace-only, seconds)\n";
   printTimingLine("load", load);
-  printTimingLine("trace", trace);
+  printTimingLine(traceLabel, trace);
+  if (haveHostPostprocess)
+  {
+    printTimingLine("host-postprocess", hostPostprocess);
+  }
   printTimingLine("output", output);
   printTimingLine("total", total);
   std::cout.flags(oldFlags);
   std::cout.precision(oldPrecision);
 }
-
 void printCompareTimingSummary(const MpiRuntime& mpi, double localCompareSeconds, double localTotalSeconds)
 {
   const TimingSummary compare = summarizeTiming(mpi, localCompareSeconds);
@@ -540,6 +547,8 @@ void traceLocalTasksForDivertorViskores(const std::string& tag,
                                         std::vector<Point3D>& trajectories,
                                         std::vector<PuncturePoint>& punctures,
                                         std::vector<std::uint8_t>& punctureValid,
+                                        double& localDeviceInvokeSeconds,
+                                        double& localHostPostprocessSeconds,
                                         bool& localFatal,
                                         std::string& localFatalMsg)
 {
@@ -574,6 +583,8 @@ void traceLocalTasksForDivertorViskores(const std::string& tag,
   }
 
   std::vector<TraceStatus> traceStatuses;
+  double batchDeviceInvokeSeconds = 0.0;
+  double batchHostPostprocessSeconds = 0.0;
   tracer.traceLines(batchSeeds,
                     batchGlobalSeedIndices,
                     makeTraceOutputViews(states, trajectories, punctures, &punctureValid),
@@ -583,7 +594,11 @@ void traceLocalTasksForDivertorViskores(const std::string& tag,
                     stateCountPerSeed,
                     trajCountPerSeed,
                     punctureCountPerSeed,
-                    traceStatuses);
+                    traceStatuses,
+                    &batchDeviceInvokeSeconds,
+                    &batchHostPostprocessSeconds);
+  localDeviceInvokeSeconds += batchDeviceInvokeSeconds;
+  localHostPostprocessSeconds += batchHostPostprocessSeconds;
 
   for (std::size_t batchIdx = 0; batchIdx < batchSeeds.size(); ++batchIdx)
   {
@@ -991,6 +1006,8 @@ int main(int argc, char** argv)
 
     bool localFatal = false;
     std::string localFatalMsg;
+    double localDeviceInvokeSeconds = 0.0;
+    double localHostPostprocessSeconds = 0.0;
 
     if (doSingle && !localFatal)
     {
@@ -1015,6 +1032,8 @@ int main(int argc, char** argv)
                                            trajectories,
                                            punctures,
                                            punctureValid,
+                                           localDeviceInvokeSeconds,
+                                           localHostPostprocessSeconds,
                                            localFatal,
                                            localFatalMsg);
 #endif
@@ -1067,6 +1086,8 @@ int main(int argc, char** argv)
                                            trajectories,
                                            punctures,
                                            punctureValid,
+                                           localDeviceInvokeSeconds,
+                                           localHostPostprocessSeconds,
                                            localFatal,
                                            localFatalMsg);
 #endif
@@ -1107,7 +1128,10 @@ int main(int argc, char** argv)
     }
 
     const SteadyClock::time_point traceEnd = SteadyClock::now();
-    const double localTraceSeconds = elapsedSeconds(traceStart, traceEnd);
+    const double localTraceSeconds = (traceEngine == TraceEngine::Viskores) ? localDeviceInvokeSeconds : elapsedSeconds(traceStart, traceEnd);
+    const double localReportedHostPostprocessSeconds =
+      (traceEngine == TraceEngine::Viskores) ? localHostPostprocessSeconds : -1.0;
+    const char* traceTimingLabel = (traceEngine == TraceEngine::Viskores) ? "device-invoke" : "trace";
 
     const SteadyClock::time_point outputStart = SteadyClock::now();
     PoincareOutput output;
@@ -1168,7 +1192,7 @@ int main(int argc, char** argv)
       }
     }
 
-    printTraceTimingSummary(mpi, localLoadSeconds, localTraceSeconds, localOutputSeconds, localTotalSeconds);
+    printTraceTimingSummary(mpi, localLoadSeconds, localTraceSeconds, localOutputSeconds, localTotalSeconds, traceTimingLabel, localReportedHostPostprocessSeconds);
 
     if (mpi.rank == 0)
     {
