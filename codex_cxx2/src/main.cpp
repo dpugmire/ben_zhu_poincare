@@ -107,7 +107,7 @@ void printUsage(const char* prog)
             << "  --np-max N            max punctures per line (default: 100)\n"
             << "  --max-steps N         max integration steps per line (default: 200 * np-max)\n"
             << "  --tol VALUE           max-abs tolerance (default: 1e-8)\n"
-            << "  --trace-engine ENG    tracing backend: cpu|viskores (default: cpu)\n"
+            << "  --trace-engine ENG    tracing backend: cpu|viskores (default: viskores)\n"
             << "  --viskores-device DEV viskores device: serial|openmp|kokkos (default: serial)\n"
             << "  --compare             enable MATLAB comparison mode (default is trace-only)\n"
             << "  --help                show this help\n";
@@ -220,6 +220,32 @@ bool isSupportedTraceEngineChoice(const std::string& valueLower)
 TraceEngine parseTraceEngineChoice(const std::string& valueLower)
 {
   return (valueLower == "viskores") ? TraceEngine::Viskores : TraceEngine::Cpu;
+}
+
+const char* traceEngineName(TraceEngine traceEngine)
+{
+  return (traceEngine == TraceEngine::Viskores) ? "viskores" : "cpu";
+}
+
+void printTraceBackendSelection(const MpiRuntime& mpi, TraceEngine traceEngine, const std::string& viskoresDevice)
+{
+  const bool viskoresActive = (traceEngine == TraceEngine::Viskores);
+
+  mpi.barrier();
+  for (int printer = 0; printer < mpi.size; ++printer)
+  {
+    if (mpi.rank == printer)
+    {
+      std::cout << "Rank " << mpi.rank << " runtime selection: trace-engine=" << traceEngineName(traceEngine)
+                << ", viskores-device=" << viskoresDevice << ", viskores-active=" << (viskoresActive ? "yes" : "no");
+      if (!viskoresActive)
+      {
+        std::cout << " (device ignored unless --trace-engine viskores)";
+      }
+      std::cout << std::endl;
+    }
+    mpi.barrier();
+  }
 }
 
 #if defined(CODEX_USE_VISKORES)
@@ -513,7 +539,7 @@ int main(int argc, char** argv)
   config.tolerance = 1.0e-8;
 
   bool doCompare = false;
-  std::string traceEngineChoice = "cpu";
+  std::string traceEngineChoice = "viskores";
   std::string viskoresDevice = "serial";
   bool viskoresDeviceSpecified = false;
   LineSpecMode lineSpecMode = LineSpecMode::none;
@@ -712,6 +738,8 @@ int main(int argc, char** argv)
 
   try
   {
+    printTraceBackendSelection(mpi, traceEngine, viskoresDevice);
+
     if (doCompare && mpi.size > 1)
     {
       if (mpi.rank == 0)
