@@ -901,6 +901,9 @@ int main(int argc, char** argv)
       {
         std::cout << "\nValidation summary: " << passed << "/" << results.size() << " cases passed\n";
       }
+      printCompareTimingSummary(mpi,
+                                elapsedSeconds(compareStart, compareEnd),
+                                elapsedSeconds(totalStart, compareEnd));
       return (passed == static_cast<int>(results.size())) ? 0 : 2;
     }
 
@@ -1148,6 +1151,9 @@ int main(int argc, char** argv)
       }
       mpi.barrier();
     }
+    const SteadyClock::time_point outputEnd = SteadyClock::now();
+    const double localOutputSeconds = elapsedSeconds(outputStart, outputEnd);
+    const double localTotalSeconds = elapsedSeconds(totalStart, outputEnd);
 
     if (mpi.rank == 0)
     {
@@ -1160,6 +1166,12 @@ int main(int argc, char** argv)
       {
         std::cout << "Wrote per-line outputs in rank order\n";
       }
+    }
+
+    printTraceTimingSummary(mpi, localLoadSeconds, localTraceSeconds, localOutputSeconds, localTotalSeconds);
+
+    if (mpi.rank == 0)
+    {
       std::cout << "\nTrace-only run complete.\n";
     }
     return 0;
