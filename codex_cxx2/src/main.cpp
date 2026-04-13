@@ -1,8 +1,8 @@
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <cmath>
 #include <cstddef>
-#include <chrono>
 #include <cstdint>
 #include <cstdlib>
 #include <iomanip>
@@ -18,6 +18,7 @@
 #endif
 
 #if defined(CODEX_USE_VISKORES)
+#include <viskores/cont/Initialize.h>
 #include <viskores/cont/RuntimeDeviceInformation.h>
 #include <viskores/cont/RuntimeDeviceTracker.h>
 #endif
@@ -554,8 +555,7 @@ void traceLocalTasksForDivertorViskores(const std::string& tag,
 {
   ViskoresFieldLineTracer tracer(data, config.traceOptions);
 
-  if (tracer.maxStatesPerSeed() != maxStatesPerSeed || tracer.maxTrajPerSeed() != maxTrajPerSeed ||
-      tracer.maxPuncPerSeed() != maxPuncPerSeed)
+  if (tracer.maxStatesPerSeed() != maxStatesPerSeed || tracer.maxTrajPerSeed() != maxTrajPerSeed || tracer.maxPuncPerSeed() != maxPuncPerSeed)
   {
     localFatal = true;
     localFatalMsg = "Viskores tracer max-per-seed caps differ from preallocated array caps";
@@ -607,8 +607,8 @@ void traceLocalTasksForDivertorViskores(const std::string& tag,
     if (isFatalTraceStatus(traceStatus))
     {
       localFatal = true;
-      localFatalMsg = "viskores trace failed on rank " + std::to_string(rank) + " for local seed " + std::to_string(localIdx) +
-        " with status " + traceStatusName(traceStatus);
+      localFatalMsg = "viskores trace failed on rank " + std::to_string(rank) + " for local seed " + std::to_string(localIdx) + " with status " +
+        traceStatusName(traceStatus);
       return;
     }
 
@@ -817,6 +817,7 @@ int main(int argc, char** argv)
 #if defined(CODEX_USE_VISKORES)
   if (traceEngine == TraceEngine::Viskores)
   {
+    viskores::cont::Initialize(argc, argv);
     std::string viskoresDeviceError;
     if (!configureViskoresDevice(viskoresDevice, viskoresDeviceError))
     {
@@ -916,9 +917,7 @@ int main(int argc, char** argv)
       {
         std::cout << "\nValidation summary: " << passed << "/" << results.size() << " cases passed\n";
       }
-      printCompareTimingSummary(mpi,
-                                elapsedSeconds(compareStart, compareEnd),
-                                elapsedSeconds(totalStart, compareEnd));
+      printCompareTimingSummary(mpi, elapsedSeconds(compareStart, compareEnd), elapsedSeconds(totalStart, compareEnd));
       return (passed == static_cast<int>(results.size())) ? 0 : 2;
     }
 
@@ -1129,8 +1128,7 @@ int main(int argc, char** argv)
 
     const SteadyClock::time_point traceEnd = SteadyClock::now();
     const double localTraceSeconds = (traceEngine == TraceEngine::Viskores) ? localDeviceInvokeSeconds : elapsedSeconds(traceStart, traceEnd);
-    const double localReportedHostPostprocessSeconds =
-      (traceEngine == TraceEngine::Viskores) ? localHostPostprocessSeconds : -1.0;
+    const double localReportedHostPostprocessSeconds = (traceEngine == TraceEngine::Viskores) ? localHostPostprocessSeconds : -1.0;
     const char* traceTimingLabel = (traceEngine == TraceEngine::Viskores) ? "device-invoke" : "trace";
 
     const SteadyClock::time_point outputStart = SteadyClock::now();
@@ -1192,7 +1190,8 @@ int main(int argc, char** argv)
       }
     }
 
-    printTraceTimingSummary(mpi, localLoadSeconds, localTraceSeconds, localOutputSeconds, localTotalSeconds, traceTimingLabel, localReportedHostPostprocessSeconds);
+    printTraceTimingSummary(
+      mpi, localLoadSeconds, localTraceSeconds, localOutputSeconds, localTotalSeconds, traceTimingLabel, localReportedHostPostprocessSeconds);
 
     if (mpi.rank == 0)
     {
