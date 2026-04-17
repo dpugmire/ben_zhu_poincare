@@ -144,6 +144,7 @@ void ViskoresFieldLineTracer::traceLines(const std::vector<Point3D>& seeds,
   {
     *deviceInvokeSeconds = static_cast<double>(deviceTimer.GetElapsedTime());
   }
+  std::cout << "Device invoke seconds: " << *deviceInvokeSeconds << std::endl;
 
   const SteadyClock::time_point hostPostprocessStart = SteadyClock::now();
   const auto stateCountPortal = batchStateCounts.ReadPortal();
@@ -163,7 +164,8 @@ void ViskoresFieldLineTracer::traceLines(const std::vector<Point3D>& seeds,
 
     ilinePerSeed[globalSeedIndex] = seeds[batchIdx].x;
     endRegionPerSeed[globalSeedIndex] = static_cast<int>(endRegionPortal.Get(static_cast<viskores::Id>(batchIdx)));
-    stateCountPerSeed[globalSeedIndex] = std::max(0, std::min(static_cast<int>(stateCountPortal.Get(static_cast<viskores::Id>(batchIdx))), maxStatesPerSeed_));
+    stateCountPerSeed[globalSeedIndex] =
+      std::max(0, std::min(static_cast<int>(stateCountPortal.Get(static_cast<viskores::Id>(batchIdx))), maxStatesPerSeed_));
     trajCountPerSeed[globalSeedIndex] = 0;
     punctureCountPerSeed[globalSeedIndex] = 0;
     connectionLengthPerSeed[globalSeedIndex] = 0.0;
