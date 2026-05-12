@@ -8,13 +8,14 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 option(CODEX_USE_MPI "Enable MPI parallel tracing over particles" OFF)
 option(CODEX_USE_VISKORES "Enable Viskores runtime integration" OFF)
 
-find_package(NetCDF REQUIRED)
+set(NETCDF_ROOT "" CACHE PATH "NetCDF C installation prefix")
 if (CODEX_USE_MPI)
     find_package(MPI REQUIRED COMPONENTS CXX)
 endif()
 if (CODEX_USE_VISKORES)
     find_package(Viskores REQUIRED CONFIG)
     find_package(OpenMP REQUIRED COMPONENTS CXX)
+    find_package(Kokkos CONFIG QUIET)
     if (APPLE AND CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND TARGET viskores::openmp)
         # Some Viskores installs export -fopenmp=libomp, while this local
         # AppleClang build uses the flags detected by FindOpenMP instead.
@@ -27,14 +28,20 @@ endif()
 find_path(NETCDF_C_INCLUDE_DIR
     NAMES netcdf.h
     HINTS
+        ${NETCDF_ROOT}
+        $ENV{NETCDF_ROOT}
         /opt/homebrew/include
-        /usr/local/include)
+        /usr/local/include
+    PATH_SUFFIXES include)
 
 find_library(NETCDF_C_LIBRARY
     NAMES netcdf
     HINTS
+        ${NETCDF_ROOT}
+        $ENV{NETCDF_ROOT}
         /opt/homebrew/lib
-        /usr/local/lib)
+        /usr/local/lib
+    PATH_SUFFIXES lib lib64)
 
 if (NOT NETCDF_C_INCLUDE_DIR)
     message(FATAL_ERROR "Could not find NetCDF C headers (netcdf.h)")
@@ -43,6 +50,9 @@ endif()
 if (NOT NETCDF_C_LIBRARY)
     message(FATAL_ERROR "Could not find NetCDF C library (libnetcdf)")
 endif()
+
+message(STATUS "NetCDF include dir: ${NETCDF_C_INCLUDE_DIR}")
+message(STATUS "NetCDF library    : ${NETCDF_C_LIBRARY}")
 
 add_executable(trace_fieldlines
     src/main.cpp
@@ -61,12 +71,12 @@ target_include_directories(trace_fieldlines
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/include
         ${NETCDF_C_INCLUDE_DIR}
-        ${NetCDF_INCLUDE_DIRS})
+)
 
 target_link_libraries(trace_fieldlines
     PRIVATE
         ${NETCDF_C_LIBRARY}
-        ${NetCDF_LIBRARIES})
+)
 
 if (CODEX_USE_MPI)
     target_compile_definitions(trace_fieldlines PRIVATE CODEX_USE_MPI=1)
@@ -81,6 +91,9 @@ if (CODEX_USE_VISKORES)
     # Avoid loading two different OpenMP runtimes in one process.
     # Viskores already links against the OpenMP runtime from its own build.
     target_link_libraries(trace_fieldlines PRIVATE viskores::cont viskores::worklet)
+    if (TARGET Kokkos::kokkos)
+        target_link_libraries(trace_fieldlines PRIVATE Kokkos::kokkos)
+    endif()
     viskores_add_target_information(trace_fieldlines
         DROP_UNUSED_SYMBOLS
         MODIFY_CUDA_FLAGS

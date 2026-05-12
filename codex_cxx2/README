@@ -28,4 +28,17 @@ FI_PROVIDER=tcp mpirun -np 2 ./build/trace_fieldlines \
   --output-dir ./outputs
 
 
-  
+
+
+## frontier
+to restore the working env:
+module restore my-working-env
+
+module reset
+module load PrgEnv-amd
+module load craype-accel-amd-gfx90a                                                       
+module load rocm/6.2.4
+module load cmake
+module load git
+module load emacs
+module load cray-netcdf-hdf5parallel/4.9.2.1
