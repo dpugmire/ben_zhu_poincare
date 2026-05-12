@@ -1,0 +1,7 @@
+{
+  "C_Cpp.default.compileCommands": "${workspaceFolder}/build/compile_commands.json",
+  "C_Cpp.default.defines": [
+    "CODEX_USE_VISKORES=1",
+    "CODEX_USE_MPI=1"
+  ]
+}
