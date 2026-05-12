@@ -518,7 +518,58 @@ const char* toViskoresDeviceName(const std::string& valueLower)
   return "";
 }
 
-bool configureViskoresDevice(const std::string& valueLower, std::string& errorMsg)
+const char* onOff(bool value)
+{
+  return value ? "ON" : "OFF";
+}
+
+void printViskoresDeviceDiagnostics(const std::string& requestedDevice,
+                                    const viskores::cont::RuntimeDeviceInformation& info,
+                                    viskores::cont::DeviceAdapterId forcedDeviceId)
+{
+  std::cout << "Viskores device requested: " << requestedDevice << "\n";
+  std::cout << "Viskores device forced: " << forcedDeviceId.GetName() << "\n";
+
+  std::cout << "Viskores runtime devices:";
+  const char* deviceNames[] = { "Serial", "OpenMP", "Kokkos", "Cuda" };
+  for (const char* deviceName : deviceNames)
+  {
+    const viskores::cont::DeviceAdapterId deviceId = info.GetId(deviceName);
+    if (!deviceId.IsValueValid())
+      continue;
+    std::cout << " " << deviceId.GetName() << "=" << (info.Exists(deviceId) ? "available" : "unavailable");
+  }
+  std::cout << "\n";
+
+#if defined(VISKORES_ENABLE_OPENMP)
+  const bool viskoresOpenMpEnabled = true;
+#else
+  const bool viskoresOpenMpEnabled = false;
+#endif
+#if defined(VISKORES_ENABLE_KOKKOS)
+  const bool viskoresKokkosEnabled = true;
+#else
+  const bool viskoresKokkosEnabled = false;
+#endif
+#if defined(VISKORES_KOKKOS_CUDA)
+  const bool viskoresKokkosCudaEnabled = true;
+#else
+  const bool viskoresKokkosCudaEnabled = false;
+#endif
+#if defined(VISKORES_KOKKOS_HIP)
+  const bool viskoresKokkosHipEnabled = true;
+#else
+  const bool viskoresKokkosHipEnabled = false;
+#endif
+
+  std::cout << "Viskores build flags:"
+            << " OPENMP=" << onOff(viskoresOpenMpEnabled)
+            << " KOKKOS=" << onOff(viskoresKokkosEnabled)
+            << " KOKKOS_CUDA=" << onOff(viskoresKokkosCudaEnabled)
+            << " KOKKOS_HIP=" << onOff(viskoresKokkosHipEnabled) << "\n";
+}
+
+bool configureViskoresDevice(const std::string& valueLower, std::string& errorMsg, bool printDiagnostics)
 {
   const std::string viskoresName = toViskoresDeviceName(valueLower);
   if (viskoresName.empty())
@@ -541,6 +592,8 @@ bool configureViskoresDevice(const std::string& valueLower, std::string& errorMs
   }
 
   viskores::cont::GetRuntimeDeviceTracker().ForceDevice(deviceId);
+  if (printDiagnostics)
+    printViskoresDeviceDiagnostics(valueLower, info, deviceId);
   return true;
 }
 
@@ -809,7 +862,7 @@ int main(int argc, char** argv)
     configureOpenMpForViskoresSerial(viskoresDevice);
     viskores::cont::Initialize(argc, argv);
     std::string viskoresDeviceError;
-    if (!configureViskoresDevice(viskoresDevice, viskoresDeviceError))
+    if (!configureViskoresDevice(viskoresDevice, viskoresDeviceError, mpi.rank == 0))
     {
       if (mpi.rank == 0)
         std::cerr << "Error: " << viskoresDeviceError << "\n";

@@ -15,6 +15,13 @@ endif()
 if (CODEX_USE_VISKORES)
     find_package(Viskores REQUIRED CONFIG)
     find_package(OpenMP REQUIRED COMPONENTS CXX)
+    if (APPLE AND CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND TARGET viskores::openmp)
+        # Some Viskores installs export -fopenmp=libomp, while this local
+        # AppleClang build uses the flags detected by FindOpenMP instead.
+        # Also avoid linking a second OpenMP runtime beside Viskores' runtime.
+        set_target_properties(viskores::openmp PROPERTIES INTERFACE_COMPILE_OPTIONS "")
+        set_target_properties(viskores::openmp PROPERTIES INTERFACE_LINK_LIBRARIES "")
+    endif()
 endif()
 
 find_path(NETCDF_C_INCLUDE_DIR
@@ -68,5 +75,15 @@ endif()
 
 if (CODEX_USE_VISKORES)
     target_compile_definitions(trace_fieldlines PRIVATE CODEX_USE_VISKORES=1)
-    target_link_libraries(trace_fieldlines PRIVATE viskores::cont OpenMP::OpenMP_CXX)
+    target_compile_options(trace_fieldlines PRIVATE $<TARGET_PROPERTY:OpenMP::OpenMP_CXX,INTERFACE_COMPILE_OPTIONS>)
+    target_compile_definitions(trace_fieldlines PRIVATE $<TARGET_PROPERTY:OpenMP::OpenMP_CXX,INTERFACE_COMPILE_DEFINITIONS>)
+    target_include_directories(trace_fieldlines PRIVATE $<TARGET_PROPERTY:OpenMP::OpenMP_CXX,INTERFACE_INCLUDE_DIRECTORIES>)
+    # Avoid loading two different OpenMP runtimes in one process.
+    # Viskores already links against the OpenMP runtime from its own build.
+    target_link_libraries(trace_fieldlines PRIVATE viskores::cont viskores::worklet)
+    viskores_add_target_information(trace_fieldlines
+        DROP_UNUSED_SYMBOLS
+        MODIFY_CUDA_FLAGS
+        DEVICE_SOURCES
+            src/ViskoresFieldLineTracer.cpp)
 endif()
