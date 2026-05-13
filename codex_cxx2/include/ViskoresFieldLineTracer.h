@@ -8,10 +8,16 @@
 
 #if defined(CODEX_USE_VISKORES)
 
+enum class ViskoresOutputMode
+{
+  Punctures,
+  States
+};
+
 class ViskoresFieldLineTracer
 {
 public:
-  ViskoresFieldLineTracer(const AparData& data, const TraceOptions& options);
+  ViskoresFieldLineTracer(const AparData& data, const TraceOptions& options, ViskoresOutputMode outputMode = ViskoresOutputMode::Punctures);
 
   int maxStatesPerSeed() const
   {
@@ -44,6 +50,8 @@ public:
 private:
   const AparData& data_;
   TraceOptions options_;
+  ViskoresOutputMode outputMode_ = ViskoresOutputMode::Punctures;
+  int maxTraceStatesPerSeed_ = 1;
   int maxStatesPerSeed_ = 1;
   int maxTrajPerSeed_ = 1;
   int maxPuncPerSeed_ = 1;

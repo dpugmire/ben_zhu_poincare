@@ -128,6 +128,7 @@ void printUsage(const char* prog)
             << "  --tol VALUE           max-abs tolerance (default: 1e-8)\n"
             << "  --trace-engine ENG    tracing backend: cpu|viskores (default: viskores)\n"
             << "  --viskores-device DEV viskores device: serial|openmp|kokkos (default: serial)\n"
+            << "  --viskores-output MODE viskores output mode: punctures|states (default: punctures)\n"
             << "  --compare             enable MATLAB comparison mode (default is trace-only)\n"
             << "  --help                show this help\n";
 }
@@ -230,10 +231,22 @@ bool isSupportedTraceEngineChoice(const std::string& valueLower)
   return valueLower == "cpu" || valueLower == "viskores";
 }
 
+bool isSupportedViskoresOutputModeChoice(const std::string& valueLower)
+{
+  return valueLower == "punctures" || valueLower == "states";
+}
+
 TraceEngine parseTraceEngineChoice(const std::string& valueLower)
 {
   return (valueLower == "viskores") ? TraceEngine::Viskores : TraceEngine::Cpu;
 }
+
+#if defined(CODEX_USE_VISKORES)
+ViskoresOutputMode parseViskoresOutputModeChoice(const std::string& valueLower)
+{
+  return (valueLower == "states") ? ViskoresOutputMode::States : ViskoresOutputMode::Punctures;
+}
+#endif
 
 struct ParsedCommandLineOptions
 {
@@ -242,6 +255,8 @@ struct ParsedCommandLineOptions
   std::string traceEngineChoice = "viskores";
   std::string viskoresDevice = "serial";
   bool viskoresDeviceSpecified = false;
+  std::string viskoresOutputModeChoice = "punctures";
+  bool viskoresOutputModeSpecified = false;
   LineSpecMode lineSpecMode = LineSpecMode::none;
   std::vector<double> requestedLines;
 };
@@ -355,6 +370,12 @@ bool parseCommandLineArguments(int argc, char** argv, const MpiRuntime& mpi, Par
       options.viskoresDeviceSpecified = true;
       continue;
     }
+    if (arg == "--viskores-output" && i + 1 < argc)
+    {
+      options.viskoresOutputModeChoice = toLowerAscii(argv[++i]);
+      options.viskoresOutputModeSpecified = true;
+      continue;
+    }
     if (arg == "--compare")
     {
       options.doCompare = true;
@@ -403,6 +424,13 @@ bool parseCommandLineArguments(int argc, char** argv, const MpiRuntime& mpi, Par
     return false;
   }
 
+  if (!isSupportedViskoresOutputModeChoice(options.viskoresOutputModeChoice))
+  {
+    if (mpi.rank == 0)
+      std::cerr << "Error: --viskores-output must be one of punctures|states\n";
+    return false;
+  }
+
   return true;
 }
 
@@ -411,7 +439,10 @@ const char* traceEngineName(TraceEngine traceEngine)
   return (traceEngine == TraceEngine::Viskores) ? "viskores" : "cpu";
 }
 
-void printTraceBackendSelection(const MpiRuntime& mpi, TraceEngine traceEngine, const std::string& viskoresDevice)
+void printTraceBackendSelection(const MpiRuntime& mpi,
+                                TraceEngine traceEngine,
+                                const std::string& viskoresDevice,
+                                const std::string& viskoresOutputMode)
 {
   const bool viskoresActive = (traceEngine == TraceEngine::Viskores);
 
@@ -421,7 +452,8 @@ void printTraceBackendSelection(const MpiRuntime& mpi, TraceEngine traceEngine, 
     if (mpi.rank == printer)
     {
       std::cout << "Rank " << mpi.rank << " runtime selection: trace-engine=" << traceEngineName(traceEngine)
-                << ", viskores-device=" << viskoresDevice << ", viskores-active=" << (viskoresActive ? "yes" : "no");
+                << ", viskores-device=" << viskoresDevice << ", viskores-output=" << viskoresOutputMode
+                << ", viskores-active=" << (viskoresActive ? "yes" : "no");
       if (!viskoresActive)
         std::cout << " (device ignored unless --trace-engine viskores)";
       std::cout << std::endl;
@@ -744,6 +776,7 @@ void traceLocalTasksForDivertor(const std::string& tag,
 void traceLocalTasksForDivertorViskores(const std::string& tag,
                                         const AparData& data,
                                         const ValidationConfig& config,
+                                        ViskoresOutputMode viskoresOutputMode,
                                         const std::vector<TraceTask>& localTasks,
                                         int rank,
                                         int maxStatesPerSeed,
@@ -764,7 +797,7 @@ void traceLocalTasksForDivertorViskores(const std::string& tag,
                                         bool& localFatal,
                                         std::string& localFatalMsg)
 {
-  ViskoresFieldLineTracer tracer(data, config.traceOptions);
+  ViskoresFieldLineTracer tracer(data, config.traceOptions, viskoresOutputMode);
 
   if (tracer.maxStatesPerSeed() != maxStatesPerSeed || tracer.maxTrajPerSeed() != maxTrajPerSeed || tracer.maxPuncPerSeed() != maxPuncPerSeed)
   {
@@ -852,11 +885,14 @@ int main(int argc, char** argv)
   const bool doCompare = options.doCompare;
   const std::string& viskoresDevice = options.viskoresDevice;
   const bool viskoresDeviceSpecified = options.viskoresDeviceSpecified;
+  const std::string& viskoresOutputModeChoice = options.viskoresOutputModeChoice;
+  const bool viskoresOutputModeSpecified = options.viskoresOutputModeSpecified;
   const LineSpecMode lineSpecMode = options.lineSpecMode;
   const std::vector<double>& requestedLines = options.requestedLines;
   const TraceEngine traceEngine = parseTraceEngineChoice(options.traceEngineChoice);
 
 #if defined(CODEX_USE_VISKORES)
+  const ViskoresOutputMode viskoresOutputMode = parseViskoresOutputModeChoice(viskoresOutputModeChoice);
   if (traceEngine == TraceEngine::Viskores)
   {
     configureOpenMpForViskoresSerial(viskoresDevice);
@@ -882,12 +918,18 @@ int main(int argc, char** argv)
       std::cerr << "Error: --viskores-device was specified, but this binary was built without Viskores support\n";
     return 1;
   }
+  if (viskoresOutputModeSpecified)
+  {
+    if (mpi.rank == 0)
+      std::cerr << "Error: --viskores-output was specified, but this binary was built without Viskores support\n";
+    return 1;
+  }
 #endif
 
   try
   {
     const SteadyClock::time_point totalStart = SteadyClock::now();
-    printTraceBackendSelection(mpi, traceEngine, viskoresDevice);
+    printTraceBackendSelection(mpi, traceEngine, viskoresDevice, viskoresOutputModeChoice);
 
     if (doCompare && mpi.size > 1)
     {
@@ -997,8 +1039,10 @@ int main(int argc, char** argv)
       mpi.barrier();
     }
 
-    const int maxStatesPerSeed = computeMaxStateCount(config.traceOptions);
-    const int maxTrajPerSeed = maxStatesPerSeed;
+    const bool compactViskoresOutput = (traceEngine == TraceEngine::Viskores && viskoresOutputModeChoice == "punctures");
+    const int traceMaxStatesPerSeed = computeMaxStateCount(config.traceOptions);
+    const int maxStatesPerSeed = compactViskoresOutput ? 1 : traceMaxStatesPerSeed;
+    const int maxTrajPerSeed = compactViskoresOutput ? 1 : maxStatesPerSeed;
     const int maxPuncPerSeed = std::max(1, config.traceOptions.npMax);
 
     const size_t localTaskCount = localTasks.size();
@@ -1044,6 +1088,7 @@ int main(int argc, char** argv)
       traceLocalTasksForDivertorViskores("single",
                                          singleData,
                                          config,
+                                         viskoresOutputMode,
                                          localTasks,
                                          mpi.rank,
                                          maxStatesPerSeed,
@@ -1091,6 +1136,7 @@ int main(int argc, char** argv)
       traceLocalTasksForDivertorViskores("circ",
                                          circData,
                                          config,
+                                         viskoresOutputMode,
                                          localTasks,
                                          mpi.rank,
                                          maxStatesPerSeed,

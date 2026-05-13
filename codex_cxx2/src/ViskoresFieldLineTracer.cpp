@@ -51,11 +51,13 @@ void clearSeedPunctureValid(const TraceOutputViews& outputs, std::size_t seedInd
 
 } // namespace
 
-ViskoresFieldLineTracer::ViskoresFieldLineTracer(const AparData& data, const TraceOptions& options)
+ViskoresFieldLineTracer::ViskoresFieldLineTracer(const AparData& data, const TraceOptions& options, ViskoresOutputMode outputMode)
   : data_(data)
   , options_(options)
-  , maxStatesPerSeed_(computeMaxStateCountFromOptions(options))
-  , maxTrajPerSeed_(maxStatesPerSeed_)
+  , outputMode_(outputMode)
+  , maxTraceStatesPerSeed_(computeMaxStateCountFromOptions(options))
+  , maxStatesPerSeed_((outputMode == ViskoresOutputMode::States) ? maxTraceStatesPerSeed_ : 1)
+  , maxTrajPerSeed_((outputMode == ViskoresOutputMode::States) ? maxTraceStatesPerSeed_ : 1)
   , maxPuncPerSeed_(std::max(1, options.npMax))
 {
 }
@@ -96,9 +98,13 @@ void ViskoresFieldLineTracer::traceLines(const std::vector<Point3D>& seeds,
   {
     throw std::runtime_error("Viskores trace requires direction to be +1 or -1");
   }
-  if (outputs.states == nullptr || outputs.trajectories == nullptr || outputs.punctures == nullptr)
+  if (outputs.punctures == nullptr)
   {
-    throw std::runtime_error("Viskores trace requires states, trajectories, and puncture output arrays");
+    throw std::runtime_error("Viskores trace requires puncture output arrays");
+  }
+  if (outputMode_ == ViskoresOutputMode::States && (outputs.states == nullptr || outputs.trajectories == nullptr))
+  {
+    throw std::runtime_error("Viskores states trace requires states and trajectories output arrays");
   }
 
   const std::size_t totalSeeds = ilinePerSeed.size();
@@ -107,11 +113,15 @@ void ViskoresFieldLineTracer::traceLines(const std::vector<Point3D>& seeds,
   {
     throw std::runtime_error("Per-seed metadata arrays must all have the same size");
   }
-  if (outputs.statesSize < totalSeeds * static_cast<std::size_t>(maxStatesPerSeed_) ||
-      outputs.trajectoriesSize < totalSeeds * static_cast<std::size_t>(maxTrajPerSeed_) ||
-      outputs.puncturesSize < totalSeeds * static_cast<std::size_t>(maxPuncPerSeed_))
+  if (outputMode_ == ViskoresOutputMode::States &&
+      (outputs.statesSize < totalSeeds * static_cast<std::size_t>(maxStatesPerSeed_) ||
+       outputs.trajectoriesSize < totalSeeds * static_cast<std::size_t>(maxTrajPerSeed_)))
   {
-    throw std::runtime_error("Output arrays are smaller than numSeeds * maxXPerSeed");
+    throw std::runtime_error("State or trajectory output arrays are smaller than numSeeds * maxXPerSeed");
+  }
+  if (outputs.puncturesSize < totalSeeds * static_cast<std::size_t>(maxPuncPerSeed_))
+  {
+    throw std::runtime_error("Puncture output array is smaller than numSeeds * maxPuncPerSeed");
   }
   if (outputs.punctureValid != nullptr && outputs.punctureValidSize < totalSeeds * static_cast<std::size_t>(maxPuncPerSeed_))
   {
@@ -119,6 +129,102 @@ void ViskoresFieldLineTracer::traceLines(const std::vector<Point3D>& seeds,
   }
 
   ViskoresAparField field(data_);
+
+  if (outputMode_ == ViskoresOutputMode::Punctures)
+  {
+    ViskoresTracePuncturesWorklet worklet(maxTraceStatesPerSeed_, maxPuncPerSeed_, options_.direction);
+    viskores::cont::Invoker invoker;
+
+    auto seedHandle = viskores::cont::make_ArrayHandle(seeds, viskores::CopyFlag::On);
+
+    viskores::cont::ArrayHandle<viskores::Id> batchStateCounts;
+    viskores::cont::ArrayHandle<viskores::Id> batchEndRegions;
+    viskores::cont::ArrayHandle<viskores::Id> batchStatusCodes;
+    viskores::cont::ArrayHandle<viskores::Id> batchTrajectoryCounts;
+    viskores::cont::ArrayHandle<viskores::Id> batchPunctureCounts;
+    viskores::cont::ArrayHandle<viskores::FloatDefault> batchConnectionLengths;
+    viskores::cont::ArrayHandle<PuncturePoint> batchPunctures;
+
+    batchStateCounts.Allocate(seedHandle.GetNumberOfValues());
+    batchEndRegions.Allocate(seedHandle.GetNumberOfValues());
+    batchStatusCodes.Allocate(seedHandle.GetNumberOfValues());
+    batchTrajectoryCounts.Allocate(seedHandle.GetNumberOfValues());
+    batchPunctureCounts.Allocate(seedHandle.GetNumberOfValues());
+    batchConnectionLengths.Allocate(seedHandle.GetNumberOfValues());
+    batchPunctures.Allocate(seedHandle.GetNumberOfValues() * static_cast<viskores::Id>(maxPuncPerSeed_));
+
+    using SteadyClock = std::chrono::steady_clock;
+
+    viskores::cont::Timer deviceTimer(invoker.GetDevice());
+    deviceTimer.Start();
+    invoker(worklet,
+            seedHandle,
+            field,
+            batchStateCounts,
+            batchEndRegions,
+            batchStatusCodes,
+            batchTrajectoryCounts,
+            batchPunctureCounts,
+            batchConnectionLengths,
+            batchPunctures);
+    deviceTimer.Stop();
+    if (deviceInvokeSeconds != nullptr)
+    {
+      *deviceInvokeSeconds = static_cast<double>(deviceTimer.GetElapsedTime());
+    }
+    std::cout << "Device invoke seconds: " << *deviceInvokeSeconds << std::endl;
+
+    const SteadyClock::time_point hostPostprocessStart = SteadyClock::now();
+    const auto stateCountPortal = batchStateCounts.ReadPortal();
+    const auto endRegionPortal = batchEndRegions.ReadPortal();
+    const auto statusPortal = batchStatusCodes.ReadPortal();
+    const auto trajectoryCountPortal = batchTrajectoryCounts.ReadPortal();
+    const auto punctureCountPortal = batchPunctureCounts.ReadPortal();
+    const auto connectionLengthPortal = batchConnectionLengths.ReadPortal();
+    const auto puncturePortal = batchPunctures.ReadPortal();
+
+    for (std::size_t batchIdx = 0; batchIdx < seeds.size(); ++batchIdx)
+    {
+      const std::size_t globalSeedIndex = static_cast<std::size_t>(globalSeedIndices[batchIdx]);
+      if (globalSeedIndex >= totalSeeds)
+      {
+        throw std::runtime_error("Global seed index is outside the output metadata arrays");
+      }
+
+      ilinePerSeed[globalSeedIndex] = seeds[batchIdx].x;
+      endRegionPerSeed[globalSeedIndex] = static_cast<int>(endRegionPortal.Get(static_cast<viskores::Id>(batchIdx)));
+      stateCountPerSeed[globalSeedIndex] =
+        std::max(0, std::min(static_cast<int>(stateCountPortal.Get(static_cast<viskores::Id>(batchIdx))), maxTraceStatesPerSeed_));
+      trajCountPerSeed[globalSeedIndex] =
+        std::max(0, std::min(static_cast<int>(trajectoryCountPortal.Get(static_cast<viskores::Id>(batchIdx))), maxTrajPerSeed_));
+      punctureCountPerSeed[globalSeedIndex] =
+        std::max(0, std::min(static_cast<int>(punctureCountPortal.Get(static_cast<viskores::Id>(batchIdx))), maxPuncPerSeed_));
+      connectionLengthPerSeed[globalSeedIndex] = static_cast<double>(connectionLengthPortal.Get(static_cast<viskores::Id>(batchIdx)));
+      clearSeedPunctureValid(outputs, globalSeedIndex, maxPuncPerSeed_);
+
+      const int statusCode = static_cast<int>(statusPortal.Get(static_cast<viskores::Id>(batchIdx)));
+      traceStatuses[batchIdx] = static_cast<TraceStatus>(statusCode);
+
+      const std::size_t globalPunctureBase = globalSeedIndex * static_cast<std::size_t>(maxPuncPerSeed_);
+      const std::size_t batchPunctureBase = batchIdx * static_cast<std::size_t>(maxPuncPerSeed_);
+      for (int i = 0; i < punctureCountPerSeed[globalSeedIndex]; ++i)
+      {
+        outputs.punctures[globalPunctureBase + static_cast<std::size_t>(i)] =
+          puncturePortal.Get(static_cast<viskores::Id>(batchPunctureBase + static_cast<std::size_t>(i)));
+        if (outputs.punctureValid != nullptr)
+        {
+          outputs.punctureValid[globalPunctureBase + static_cast<std::size_t>(i)] = static_cast<std::uint8_t>(1);
+        }
+      }
+    }
+
+    if (hostPostprocessSeconds != nullptr)
+    {
+      *hostPostprocessSeconds = std::chrono::duration<double>(SteadyClock::now() - hostPostprocessStart).count();
+    }
+    return;
+  }
+
   ViskoresTraceStatesWorklet worklet(maxStatesPerSeed_, options_.direction);
   viskores::cont::Invoker invoker;
 
