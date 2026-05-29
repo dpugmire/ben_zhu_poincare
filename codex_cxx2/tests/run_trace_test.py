@@ -13,7 +13,7 @@ SKIP_EXIT_CODE = 77
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Run Viskores trace tests and optionally compare to MATLAB output.")
-    parser.add_argument("--mode", choices=("generate", "compare"), required=True)
+    parser.add_argument("--mode", choices=("generate", "compare", "compare-serial"), required=True)
     parser.add_argument("--exe", required=True)
     parser.add_argument("--divertor", choices=("single", "circ"), required=True)
     parser.add_argument("--lines", required=True)
@@ -24,6 +24,9 @@ def parse_args():
     parser.add_argument("--viskores-device", default="serial")
     parser.add_argument("--np-max", type=int, default=700)
     parser.add_argument("--tolerance", type=float, default=1.0e-8)
+    parser.add_argument("--mpi-exec", default="")
+    parser.add_argument("--mpi-numproc-flag", default="-n")
+    parser.add_argument("--mpi-procs", type=int, default=1)
     return parser.parse_args()
 
 
@@ -70,6 +73,11 @@ def check_inputs(args):
     missing = []
     if not exe.exists():
         missing.append(str(exe))
+    needs_mpi = args.mpi_procs > 1 or args.mode == "compare-serial"
+    if needs_mpi and not args.mpi_exec:
+        missing.append("MPI launcher (--mpi-exec)")
+    if needs_mpi and args.mpi_exec and not Path(args.mpi_exec).exists():
+        missing.append(args.mpi_exec)
     if args.divertor == "single" and not single_apar.exists():
         missing.append(str(single_apar))
     if args.divertor == "circ" and not circ_apar.exists():
@@ -85,13 +93,14 @@ def check_inputs(args):
     return True
 
 
-def run_trace(args):
-    output_dir = Path(args.output_dir)
+def run_trace(args, output_dir_override=None, mpi_procs_override=None):
+    output_dir = Path(output_dir_override) if output_dir_override is not None else Path(args.output_dir)
+    mpi_procs = args.mpi_procs if mpi_procs_override is None else mpi_procs_override
     if output_dir.exists():
         shutil.rmtree(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    command = [
+    trace_command = [
         args.exe,
         "--trace-engine",
         "viskores",
@@ -110,17 +119,22 @@ def run_trace(args):
     ]
 
     if args.divertor == "single":
-        command += ["--single-apar", args.single_apar]
+        trace_command += ["--single-apar", args.single_apar]
     else:
-        command += ["--circ-apar", args.circ_apar]
+        trace_command += ["--circ-apar", args.circ_apar]
+
+    if mpi_procs > 1:
+        command = [args.mpi_exec, args.mpi_numproc_flag, str(mpi_procs)] + trace_command
+    else:
+        command = trace_command
 
     print("Running:")
     print(" ".join(command), flush=True)
     subprocess.run(command, check=True)
 
 
-def combine_outputs(args):
-    output_dir = Path(args.output_dir)
+def combine_outputs(args, output_dir_override=None):
+    output_dir = Path(output_dir_override) if output_dir_override is not None else Path(args.output_dir)
     files = [
         path
         for path in output_dir.glob(f"ip_cxx.{args.divertor}.*.txt")
@@ -145,6 +159,23 @@ def combine_outputs(args):
     rows = max(0, sum(1 for _ in combined.open()) - 1)
     print(f"Combined puncture file: {combined}")
     print(f"Combined puncture rows: {rows}")
+    return combined
+
+
+def summarize_row_differences(generated_rows, reference_rows):
+    max_abs = 0.0
+    sum_sq = 0.0
+    count = 0
+
+    for generated_row, reference_row in zip(generated_rows, reference_rows):
+        for column in range(2, 5):
+            diff = generated_row[column] - reference_row[column]
+            max_abs = max(max_abs, abs(diff))
+            sum_sq += diff * diff
+            count += 1
+
+    l2 = math.sqrt(sum_sq / count) if count else 0.0
+    return max_abs, l2
 
 
 def compare_outputs(args):
@@ -165,19 +196,7 @@ def compare_outputs(args):
 
         generated_rows = load_numeric_rows(generated)
         reference_rows = load_numeric_rows(reference)
-        row_count = min(len(generated_rows), len(reference_rows))
-        max_abs = 0.0
-        sum_sq = 0.0
-        count = 0
-
-        for generated_row, reference_row in zip(generated_rows, reference_rows):
-            for column in range(2, 5):
-                diff = generated_row[column] - reference_row[column]
-                max_abs = max(max_abs, abs(diff))
-                sum_sq += diff * diff
-                count += 1
-
-        l2 = math.sqrt(sum_sq / count) if count else 0.0
+        max_abs, l2 = summarize_row_differences(generated_rows, reference_rows)
         ok = len(generated_rows) == len(reference_rows) and max_abs < args.tolerance
         status = "PASS" if ok else "FAIL"
         if not ok:
@@ -193,10 +212,54 @@ def compare_outputs(args):
     return 0
 
 
+def compare_mpi_to_serial(args):
+    root_output_dir = Path(args.output_dir)
+    serial_output_dir = root_output_dir / "serial"
+    mpi_output_dir = root_output_dir / "mpi"
+
+    run_trace(args, serial_output_dir, 1)
+    combine_outputs(args, serial_output_dir)
+
+    run_trace(args, mpi_output_dir, args.mpi_procs)
+    combine_outputs(args, mpi_output_dir)
+
+    failures = 0
+    print(f"\nComparing MPI Viskores {args.divertor} output to serial Viskores output")
+    print("line mpi/serial rows maxAbsXYZ l2XYZ status")
+
+    for line in numeric_lines(args.lines):
+        mpi_file = mpi_output_dir / f"ip_cxx.{args.divertor}.{line}.txt"
+        serial_file = serial_output_dir / f"ip_cxx.{args.divertor}.{line}.txt"
+        if not mpi_file.exists() or not serial_file.exists():
+            print(f"{line:4d} missing mpi={mpi_file.exists()} serial={serial_file.exists()} FAIL")
+            failures += 1
+            continue
+
+        mpi_rows = load_numeric_rows(mpi_file)
+        serial_rows = load_numeric_rows(serial_file)
+        max_abs, l2 = summarize_row_differences(mpi_rows, serial_rows)
+        ok = len(mpi_rows) == len(serial_rows) and max_abs < args.tolerance
+        status = "PASS" if ok else "FAIL"
+        if not ok:
+            failures += 1
+
+        print(f"{line:4d} {len(mpi_rows):4d}/{len(serial_rows):4d} {max_abs:.12g} {l2:.12g} {status}")
+
+    if failures:
+        print(f"\nMPI/serial comparison failed for {failures} case(s).")
+        return 1
+
+    print("\nMPI/serial comparison passed.")
+    return 0
+
+
 def main():
     args = parse_args()
     if not check_inputs(args):
         return SKIP_EXIT_CODE
+
+    if args.mode == "compare-serial":
+        return compare_mpi_to_serial(args)
 
     run_trace(args)
     combine_outputs(args)

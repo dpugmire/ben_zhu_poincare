@@ -60,6 +60,8 @@ Useful direct commands:
 ```sh
 ctest -R viskores_generate --output-on-failure
 ctest -R viskores_compare --output-on-failure
+ctest -R viskores_mpi --output-on-failure
+ctest -R 'viskores_mpi_compare_.*_serial' --output-on-failure
 ```
 
 Generated combined puncture files are written under the build tree:
@@ -67,12 +69,25 @@ Generated combined puncture files are written under the build tree:
 ```text
 build-viskores2/test-output/viskores_generate_single_text/ip_cxx.single.all.txt
 build-viskores2/test-output/viskores_generate_circ_text/ip_cxx.circ.all.txt
+build-viskores2/test-output/viskores_mpi_generate_single_text/ip_cxx.single.all.txt
+build-viskores2/test-output/viskores_mpi_generate_circ_text/ip_cxx.circ.all.txt
+build-viskores2/test-output/viskores_mpi_compare_single_serial/mpi/ip_cxx.single.all.txt
+build-viskores2/test-output/viskores_mpi_compare_circ_serial/mpi/ip_cxx.circ.all.txt
 ```
 
 The MATLAB comparison tests compare Viskores puncture output against the
 `zperiod_5` MATLAB reference files and print row counts plus max XYZ error.
 Those comparison tests may fail while the Viskores/MATLAB mismatch is being
 debugged.
+
+When configured with `-DCODEX_USE_MPI=ON`, CMake also adds 2-rank MPI versions
+of the same generation and MATLAB comparison tests. It also adds MPI-vs-serial
+tests that compare each MPI puncture file against a serial Viskores run for the
+same line list. Override the rank count with:
+
+```sh
+cmake -S . -B build-viskores2 -DCODEX_TEST_MPI_PROCS=4
+```
 
 Test data paths can be overridden at configure time:
 
