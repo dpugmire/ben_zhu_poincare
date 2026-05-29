@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.16)
 project(codex_cxx2 LANGUAGES CXX)
 
+include(CTest)
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -99,4 +101,44 @@ if (CODEX_USE_VISKORES)
         MODIFY_CUDA_FLAGS
         DEVICE_SOURCES
             src/ViskoresFieldLineTracer.cpp)
+endif()
+
+if (BUILD_TESTING AND CODEX_USE_VISKORES)
+    find_package(Python3 REQUIRED COMPONENTS Interpreter)
+
+    set(CODEX_TEST_DATA_DIR "${CMAKE_CURRENT_SOURCE_DIR}/.." CACHE PATH "Directory containing apar NetCDF files and MATLAB baselines")
+    set(CODEX_TEST_APAR_SINGLE "${CODEX_TEST_DATA_DIR}/apar.single.nc" CACHE FILEPATH "Single-null apar NetCDF file for tests")
+    set(CODEX_TEST_APAR_CIRC "${CODEX_TEST_DATA_DIR}/apar.circ.nc" CACHE FILEPATH "Circular apar NetCDF file for tests")
+    set(CODEX_TEST_REFERENCE_DIR "${CODEX_TEST_DATA_DIR}/zperiod_5" CACHE PATH "MATLAB reference directory for tests")
+    set(CODEX_TEST_VISKORES_DEVICE "serial" CACHE STRING "Viskores device used by CTest trace tests")
+    set(CODEX_TEST_NP_MAX "700" CACHE STRING "Maximum punctures per field line used by CTest trace tests")
+    set(CODEX_TEST_TOLERANCE "1e-8" CACHE STRING "Maximum absolute XYZ tolerance for MATLAB comparison tests")
+
+    set(CODEX_TEST_SINGLE_LINES "11,21,26,31,41,51,61,81,101,121,126,131,141,147,148,149,150,151,152,153,161,171,176,181,191,201")
+    set(CODEX_TEST_CIRC_LINES "51,101,151,201,301,401,501")
+
+    function(codex_add_vp_test test_name test_mode divertor lines)
+        add_test(NAME ${test_name}
+            COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/tests/run_trace_test.py
+                --mode ${test_mode}
+                --exe $<TARGET_FILE:trace_fieldlines>
+                --divertor ${divertor}
+                --lines ${lines}
+                --single-apar ${CODEX_TEST_APAR_SINGLE}
+                --circ-apar ${CODEX_TEST_APAR_CIRC}
+                --reference-dir ${CODEX_TEST_REFERENCE_DIR}
+                --output-dir ${CMAKE_CURRENT_BINARY_DIR}/test-output/${test_name}
+                --viskores-device ${CODEX_TEST_VISKORES_DEVICE}
+                --np-max ${CODEX_TEST_NP_MAX}
+                --tolerance ${CODEX_TEST_TOLERANCE})
+        set_tests_properties(${test_name} PROPERTIES
+            SKIP_RETURN_CODE 77
+            TIMEOUT 180)
+    endfunction()
+
+    codex_add_vp_test(viskores_generate_single_text generate single ${CODEX_TEST_SINGLE_LINES})
+    codex_add_vp_test(viskores_generate_circ_text generate circ ${CODEX_TEST_CIRC_LINES})
+    codex_add_vp_test(viskores_compare_single_matlab compare single ${CODEX_TEST_SINGLE_LINES})
+    codex_add_vp_test(viskores_compare_circ_matlab compare circ ${CODEX_TEST_CIRC_LINES})
 endif()

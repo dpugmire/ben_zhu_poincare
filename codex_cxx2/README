@@ -42,3 +42,42 @@ module load cmake
 module load git
 module load emacs
 module load cray-netcdf-hdf5parallel/4.9.2.1
+
+
+## tests
+
+When the build is configured with `-DCODEX_USE_VISKORES=ON`, CMake adds Viskores
+CTest tests. The generate tests run the compact puncture path and create combined
+text files with all punctures:
+
+```sh
+cd build-viskores2
+make test
+```
+
+Useful direct commands:
+
+```sh
+ctest -R viskores_generate --output-on-failure
+ctest -R viskores_compare --output-on-failure
+```
+
+Generated combined puncture files are written under the build tree:
+
+```text
+build-viskores2/test-output/viskores_generate_single_text/ip_cxx.single.all.txt
+build-viskores2/test-output/viskores_generate_circ_text/ip_cxx.circ.all.txt
+```
+
+The MATLAB comparison tests compare Viskores puncture output against the
+`zperiod_5` MATLAB reference files and print row counts plus max XYZ error.
+Those comparison tests may fail while the Viskores/MATLAB mismatch is being
+debugged.
+
+Test data paths can be overridden at configure time:
+
+```sh
+cmake -S . -B build-viskores2 \
+  -DCODEX_USE_VISKORES=ON \
+  -DCODEX_TEST_DATA_DIR=/Users/dpn/proj/bout++/ben_zhu_poincare
+```
